@@ -117,30 +117,154 @@ rm kodetect.db          # Windows: del kodetect.db
 
 ---
 
-## 2. 배포 (Render)
+## 2. Render 배포 매뉴얼
 
-상세는 **[docs/DEPLOY_RENDER.md](docs/DEPLOY_RENDER.md)** 를 보십시오. 요약하면:
+두 경로가 있습니다. 처음이면 **2-A(Blueprint)** 가 가장 안전합니다.
+이미 New Web Service 화면에 들어와 계시면 **2-B** 의 표를 그대로 옮겨 적으십시오.
 
-**Blueprint (권장)** — 대시보드 → New → Blueprint → 저장소 선택 → Apply.
-저장소의 `render.yaml` 이 웹 서비스와 Postgres를 함께 만듭니다.
-배포 후 `AUTH_PASSWORD` 하나만 입력하면 됩니다.
+### 2-A. Blueprint — `render.yaml` 로 한 번에 (권장)
 
-**수동 생성** — New Web Service 화면에서 Start Command를 반드시 바꾸십시오.
+대시보드 → **New → Blueprint** → `limpst/proto-kodetect` 선택 → **Apply**
+
+저장소의 `render.yaml` 이 웹 서비스와 Postgres를 함께 만들고, 빌드·시작 명령과
+환경변수를 자동으로 채웁니다. 배포 후 대시보드에서 **`AUTH_PASSWORD` 하나만**
+입력하면 끝입니다 (`sync: false` 로 두어 비밀번호가 저장소에 남지 않습니다).
+
+API 키도 CLI 토큰도 필요 없습니다.
+
+### 2-B. 수동 생성 — New Web Service 화면 입력값
+
+#### ① 기본 필드
+
+| 필드 | 넣을 값 |
+|---|---|
+| Source Code | `limpst / proto-kodetect` |
+| Name | `proto-kodetect` |
+| Language | **Python 3** |
+| Branch | `main` |
+| Region | **Oregon (US West)** — 기존 서비스와 같은 리전 |
+| Root Directory | *(비움)* |
+| Build Command | `pip install -r requirements.txt` |
+| **Start Command** | `uvicorn app.main:app --host 0.0.0.0 --port $PORT --app-dir backend` |
+
+> ⚠️ **Start Command는 반드시 바꾸십시오.** Render가 자동입력하는
+> `gunicorn your_application.wsgi` 로는 뜨지 않습니다. 이 앱은 WSGI가 아니라
+> **ASGI(FastAPI)** 이고, 실시간 계측에 **WebSocket** 을 씁니다.
+>
+> `--app-dir backend` 가 `backend/` 를 import 경로에 넣습니다. `datagen`·`rl` 은
+> 저장소 루트에 있으므로 `PYTHONPATH=backend:.` 도 함께 넣습니다.
+
+#### ② Compute 플랜
+
+| 플랜 | 판단 |
+|---|---|
+| **Free** ($0 · 0.1 CPU · 512MB) | 시연·검토용. 아래 제약을 먼저 읽으십시오 |
+| **Starter** ($7 · 0.5 CPU · 512MB) | 상시 가동 + 영구 디스크가 필요할 때 최소 선택 |
+| Standard ($25 · 1 CPU · 2GB) | 4K 드론 원본을 실제로 분석시킬 때 |
+
+**Free 플랜 제약 — 시연 전에 알고 계셔야 합니다**
+
+1. **15분 무접속 시 정지.** 다음 접속은 콜드스타트 30~60초, 실시간 WebSocket이
+   끊깁니다(화면이 3초 뒤 자동 재연결).
+2. **영구 디스크 없음.** 업로드 원본·오버레이가 재배포 시 사라집니다.
+   `STORAGE_DIR=/tmp/storage` 로 두십시오.
+3. **512MB 메모리.** numpy+opencv 상주가 약 300MB입니다. 4000×3000 원본을
+   그대로 올리면 검출 중 OOM으로 죽을 수 있습니다 — 1600px 이하로 리사이즈하거나
+   Standard 이상을 쓰십시오.
+
+#### ③ Environment Variables
+
+**Add from .env** 를 눌러 아래를 통째로 붙여넣는 것이 가장 빠릅니다.
+
+```env
+PYTHON_VERSION=3.12.8
+PYTHONPATH=backend:.
+AUTH_ENABLED=1
+AUTH_USER=admin
+AUTH_PASSWORD=여기에-강한-비밀번호
+STORAGE_DIR=/tmp/storage
+WEB_CONCURRENCY=1
+OMP_NUM_THREADS=1
+```
+
+그리고 **`SESSION_SECRET` 은 따로 추가하면서 값 옆의 `Generate` 버튼**을 누르십시오.
+
+| 변수 | 왜 필요한가 |
+|---|---|
+| `SESSION_SECRET` | 세션 쿠키 HMAC 서명 키. **비워 두면 프로세스마다 새로 생성**되어 재배포·워커 증설 때마다 전원 로그아웃됩니다 |
+| `PYTHON_VERSION` | 3.12 고정. numpy·opencv 휠이 모두 제공되어 빌드가 빠릅니다 |
+| `PYTHONPATH` | `backend`(도메인 코드) + `.`(datagen·rl) 둘 다 필요 |
+| `WEB_CONCURRENCY=1` | 512MB에서 워커를 늘리면 OOM. 늘리려면 `SESSION_SECRET` 고정이 선행 조건 |
+| `STORAGE_DIR` | free는 `/tmp/storage`, 디스크를 붙였으면 `/var/data/storage` |
+| `AUTH_PASSWORD` | **저장소에 넣지 마십시오.** 대시보드에서만 입력 |
+
+#### ④ Advanced 설정
+
+| 항목 | 값 | 이유 |
+|---|---|---|
+| **Health Check Path** | `/healthz` | 넣어야 Render가 앱이 실제로 살아났는지 확인합니다. 비우면 포트만 열려도 성공으로 봅니다 |
+| **Auto-Deploy** | `On Commit` | `main` 푸시 시 자동 재배포 |
+| **Pre-Deploy Command** | *(비움)* | 기동 시 `init_db()` 가 테이블을 만들고 비어 있으면 시연 데이터를 넣습니다. 별도 마이그레이션 단계가 없습니다 |
+| **Build Filters** | *(비움)* | 문서만 고쳐도 재배포되는 게 싫으면 Ignored Paths에 `docs/**`, `n8n/**` |
+| **Secret Files** | 선택 · 파일명 `.env` | 환경변수를 하나씩 넣는 대신 `.env` 전체를 올려도 됩니다. 앱이 `pydantic-settings` 로 루트의 `.env` 를 읽습니다 |
+| **Persistent Disk** | 유료 전용 · Mount Path `/var/data` · 1GB | 붙였다면 `STORAGE_DIR=/var/data/storage` 로 변경 |
+| **Maintenance Mode** | Off | — |
+
+#### ⑤ 데이터베이스 (선택)
+
+**넣지 않으면** SQLite가 임시 디스크에 만들어져 재시작마다 초기화됩니다.
+시연용으로는 오히려 편합니다 — 매번 깨끗한 시연 데이터로 시작합니다.
+
+**보존하려면** New → **PostgreSQL** (Oregon, free) 을 만들고 환경변수에 추가:
 
 ```
-uvicorn app.main:app --host 0.0.0.0 --port $PORT --app-dir backend
+DATABASE_URL = <Postgres의 Internal Database URL>
 ```
 
-자동입력되는 `gunicorn your_application.wsgi` 로는 뜨지 않습니다. 이 앱은
-ASGI(FastAPI)이고 WebSocket을 씁니다. Health Check Path는 `/healthz` 로 두십시오.
+Render가 주는 URL은 `postgres://...` 스킴인데 SQLAlchemy 2.x는 이를 받지 않습니다.
+**앱이 `postgresql+psycopg://` 로 자동 정규화**하므로 그대로 붙여넣으면 됩니다
+(`backend/app/config.py` 의 `sqlalchemy_url`).
 
-필수 환경변수 — `PYTHON_VERSION=3.12.8` · `PYTHONPATH=backend:.` ·
-`SESSION_SECRET`(Generate) · `AUTH_USER` · `AUTH_PASSWORD` ·
-`STORAGE_DIR=/tmp/storage` · `WEB_CONCURRENCY=1`
+### 2-C. 배포 후 확인
 
-> **free 플랜 제약** — 15분 무접속 시 정지(콜드스타트 30~60초, WebSocket 재연결
-> 필요) · 영구 디스크 없음(업로드 원본 소실) · 512MB(대형 원본 분석 시 OOM 가능).
-> `Dockerfile` 도 포함되어 있어 온프레미스·Docker 런타임 배포도 가능합니다.
+```bash
+curl https://proto-kodetect.onrender.com/healthz
+# {"ok":true,"app":"KO-Detect","version":"0.1.0"}
+```
+
+1. `/login` → `AUTH_USER` / `AUTH_PASSWORD` 로 로그인
+2. 개요 화면에 시설물 3동(D·C·D)이 보이면 시딩까지 정상
+3. 상단 우측 표시등이 **초록**이면 WebSocket 정상 (지수가 1초마다 갱신)
+4. 균열 분석 → **합성 표본으로 시연** 으로 검출 파이프라인 전체 확인
+
+### 2-D. 자주 걸리는 문제
+
+| 증상 | 원인 · 조치 |
+|---|---|
+| 빌드는 되는데 기동 실패 | Start Command가 gunicorn 그대로 → uvicorn 명령으로 교체 |
+| `ModuleNotFoundError: app` | `--app-dir backend` 누락 |
+| `ModuleNotFoundError: rl` / `datagen` | `PYTHONPATH=backend:.` 누락 |
+| 재배포마다 로그아웃 | `SESSION_SECRET` 미설정 |
+| `Can't load plugin: sqlalchemy.dialects:postgres` | 구버전 코드. 최신은 자동 정규화 — pull 후 재배포 |
+| 업로드 파일이 사라짐 | free 임시 디스크 → 유료 + 영구 디스크 |
+| 첫 요청이 30~60초 | free 콜드스타트 → 유료 플랜은 상시 가동 |
+| 검출 중 프로세스 종료 | 512MB OOM → 이미지 리사이즈 또는 Standard |
+
+### 2-E. torch는 배포하지 않습니다
+
+`requirements.txt` 에는 **torch가 없습니다.** 강화학습 *학습* 에만 필요하고
+서비스 구동에는 불필요하기 때문입니다 (약 200MB — 512MB 환경에 치명적).
+
+학습된 정책(`models/rl_v1/`)이 없으면 유지관리 정책 화면은 규칙 기반으로 자동
+대체되고 나머지 기능은 전부 정상 동작합니다. 학습은 로컬에서 하십시오.
+
+```bash
+pip install -r requirements-dev.txt      # torch 포함
+python -m rl.train --episodes 600 --out models/rl_v1
+```
+
+> 온프레미스·폐쇄망 배포는 저장소의 `Dockerfile` 을 쓰십시오.
+> 더 자세한 내용은 **[docs/DEPLOY_RENDER.md](docs/DEPLOY_RENDER.md)**.
 
 ---
 
