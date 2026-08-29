@@ -30,3 +30,4 @@ data/
 models/
 docs/server.log
 docs/rl_train.log
+docs/bench/sample_checkup_report.html

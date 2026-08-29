@@ -36,6 +36,10 @@ MIN_LENGTH_PX = 40        # 균열로 인정할 최소 골격 길이
 MIN_ELONGATION = 2.5      # 장축/단축 비 — 균열은 가늘고 길다
 MAX_FILL_RATIO = 0.62     # 외접사각형 대비 채움비가 높으면 얼룩/그림자
 
+# 신뢰도 문턱. 벤치마크(data/bench_test 60장)에서 F1이 최대인 지점으로 잡았다.
+CLASSIFIER_CONFIDENCE = 0.30   # 학습 분류기의 확률
+HEURISTIC_CONFIDENCE = 0.58    # 분류기가 없을 때의 형상 점수
+
 
 @dataclass
 class CrackInstance:
@@ -50,6 +54,7 @@ class CrackInstance:
     elongation: float
     confidence: float
     polyline: list[tuple[int, int]] = field(default_factory=list)
+    features: dict[str, float] = field(default_factory=dict)
 
     # 물리 단위 — GSD 적용 후 채워진다
     length_mm: float | None = None
@@ -258,17 +263,331 @@ def _segment(
     return mask, dark, normal
 
 
-def _group_components(mask: np.ndarray, gap_px: int) -> tuple[int, np.ndarray]:
-    """끊어진 파편을 하나의 균열 인스턴스로 묶는다.
+def _principal_axis(pts: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """점군의 주축 단위벡터와 중심. pts 는 (N,2) [y,x]."""
+    c = pts.mean(axis=0)
+    centered = pts - c
+    if len(pts) < 2:
+        return np.array([1.0, 0.0], np.float32), c
+    _, _, vt = np.linalg.svd(centered.astype(np.float32), full_matrices=False)
+    return vt[0], c
 
-    마스크를 gap_px 만큼 팽창시켜 라벨링하면, 근접한 파편이 같은 라벨을 갖는다.
-    그 라벨을 원본 마스크에 되돌려 인스턴스 단위를 만든다.
+
+def _endpoints_and_tangents(
+    ridge_pts: np.ndarray, tail: int = 6
+) -> tuple[np.ndarray, np.ndarray] | None:
+    """중심선의 양 끝점과 그 지점의 접선 방향.
+
+    주축으로 정렬한 뒤 양 끝 `tail` 개 점으로 국소 접선을 구한다. 전체 주축을
+    쓰면 굽은 균열에서 끝단 방향이 틀어져 엉뚱한 파편과 이어진다.
+    반환: (끝점 2개 [y,x], 바깥을 향하는 접선 2개)
     """
-    if gap_px <= 0:
-        return cv2.connectedComponents(mask, 8)
-    k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (gap_px * 2 + 1,) * 2)
-    n, labels = cv2.connectedComponents(cv2.dilate(mask, k), 8)
-    return n, np.where(mask > 0, labels, 0)
+    if len(ridge_pts) < 4:
+        return None
+    axis, _ = _principal_axis(ridge_pts)
+    proj = (ridge_pts - ridge_pts.mean(axis=0)) @ axis
+    order = np.argsort(proj)
+    ordered = ridge_pts[order]
+
+    k = min(tail, max(2, len(ordered) // 3))
+    head_pts, tail_pts = ordered[:k], ordered[-k:]
+
+    p0, p1 = ordered[0].astype(np.float32), ordered[-1].astype(np.float32)
+    t0 = p0 - head_pts.mean(axis=0)          # 시작점에서 바깥으로
+    t1 = p1 - tail_pts.mean(axis=0)          # 끝점에서 바깥으로
+
+    def unit(v: np.ndarray) -> np.ndarray:
+        n = float(np.linalg.norm(v))
+        return v / n if n > 1e-6 else axis
+
+    return np.stack([p0, p1]), np.stack([unit(t0), unit(t1)])
+
+
+class _UnionFind:
+    def __init__(self, n: int) -> None:
+        self.p = list(range(n))
+
+    def find(self, a: int) -> int:
+        while self.p[a] != a:
+            self.p[a] = self.p[self.p[a]]
+            a = self.p[a]
+        return a
+
+    def union(self, a: int, b: int) -> None:
+        ra, rb = self.find(a), self.find(b)
+        if ra != rb:
+            self.p[rb] = ra
+
+
+def _link_fragments(
+    mask: np.ndarray,
+    dist: np.ndarray,
+    max_link_px: float,
+    min_align: float = 0.80,
+) -> tuple[int, np.ndarray]:
+    """끊어진 파편을 **방향이 맞을 때만** 하나의 균열로 잇는다.
+
+    팽창(dilation)으로 묶으면 가까이 있기만 하면 붙어버려, 나란한 별개의 균열이
+    한 덩어리가 되고 일직선으로 이어질 파편은 간격이 조금만 넓어도 못 잇는다.
+
+    여기서는 각 파편의 끝점과 그 지점의 접선을 구한 뒤, 두 끝점을 잇는 벡터가
+    **양쪽 접선과 모두 정렬될 때만** 연결한다. 균열의 연속은 방향의 연속이다.
+    """
+    n, labels, stats, _ = cv2.connectedComponentsWithStats(mask, 8)
+    if n <= 2:
+        return n, labels
+
+    # 끝점 추출은 크롭에서만 한다. 전역 마스크를 컴포넌트마다 훑으면
+    # 이미지 크기 x 컴포넌트 수만큼 스캔이 발생해 실측에서 수십 초가 걸린다.
+    ends: dict[int, tuple[np.ndarray, np.ndarray]] = {}
+    boxes: dict[int, tuple[int, int, int, int]] = {}
+    for i in range(1, n):
+        x, y, cw, ch, area = stats[i]
+        if area < MIN_AREA_PX:
+            continue                       # 잡티는 이을 대상이 아니다
+        sub_lab = labels[y : y + ch, x : x + cw]
+        comp = sub_lab == i
+        comp_dist = np.where(comp, dist[y : y + ch, x : x + cw], 0.0)
+        ridge = _ridge_points(comp_dist, comp.astype(np.uint8))
+        pts = np.argwhere(ridge)
+        if len(pts) < 4:
+            pts = np.argwhere(comp)
+        e = _endpoints_and_tangents(pts)
+        if e is None:
+            continue
+        pts_abs, tang = e
+        pts_abs = pts_abs + np.array([y, x], np.float32)   # 전역 좌표로
+        ends[i] = (pts_abs, tang)
+        boxes[i] = (x, y, cw, ch)
+
+    def _box_gap(a: int, b: int) -> float:
+        ax, ay, aw, ah = boxes[a]
+        bx, by, bw, bh = boxes[b]
+        dx = max(0, max(ax - (bx + bw), bx - (ax + aw)))
+        dy = max(0, max(ay - (by + bh), by - (ay + ah)))
+        return float(np.hypot(dx, dy))
+
+    uf = _UnionFind(n)
+    keys = sorted(ends)
+    for ai in range(len(keys)):
+        a = keys[ai]
+        pa, ta = ends[a]
+        for bi in range(ai + 1, len(keys)):
+            b = keys[bi]
+            # 외접사각형 간 거리로 먼저 걸러 낸다 (O(1) 사전검사)
+            if _box_gap(a, b) > max_link_px:
+                continue
+            pb, tb = ends[b]
+            linked = False
+            for u in range(2):
+                for v in range(2):
+                    d = pb[v] - pa[u]
+                    dist_ab = float(np.linalg.norm(d))
+                    if dist_ab > max_link_px or dist_ab < 1e-6:
+                        continue
+                    dir_ab = d / dist_ab
+                    # a의 끝단은 b쪽을 향하고, b의 끝단은 a쪽을 향해야 한다
+                    align = float(dir_ab @ ta[u]) * float(-(dir_ab @ tb[v]))
+                    if align >= min_align:
+                        linked = True
+                        break
+                if linked:
+                    break
+            if linked:
+                uf.union(a, b)
+
+    remap = np.zeros(n, np.int32)
+    next_id = 1
+    seen: dict[int, int] = {}
+    for i in range(1, n):
+        root = uf.find(i)
+        if root not in seen:
+            seen[root] = next_id
+            next_id += 1
+        remap[i] = seen[root]
+    return next_id, remap[labels]
+
+
+def robust_widths(widths: np.ndarray, k: float = 3.0) -> np.ndarray:
+    """MAD 기반 이상치 제거.
+
+    FWHM 프로파일은 분기 교차점과 끝단에서 튄다. 표준편차로 자르면 이상치가
+    임계 자체를 끌어올려 무력해지므로, 중앙값 절대편차(MAD)를 쓴다.
+    MAD는 표본의 절반이 오염돼도 무너지지 않는다.
+    """
+    if widths.size < 5:
+        return widths
+    med = float(np.median(widths))
+    mad = float(np.median(np.abs(widths - med)))
+    if mad < 1e-9:
+        return widths
+    scale = 1.4826 * mad          # 정규분포에서 표준편차와 같아지는 보정계수
+    keep = np.abs(widths - med) <= k * scale
+    return widths[keep] if keep.sum() >= 3 else widths
+
+
+# ─── 형상 특징 · 오검출 분류기 ─────────────────────────────────
+# 특징 순서를 여기서 고정한다. 학습기와 추론기가 같은 순서를 봐야 하므로
+# 이 목록을 바꾸면 반드시 모델을 다시 학습해야 한다.
+FEATURE_NAMES: tuple[str, ...] = (
+    "log_length",        # 길이 — 긴 것일수록 균열
+    "log_area",
+    "elongation",        # 장축/단축
+    "fill_ratio",        # 외접사각형 채움비 — 얼룩은 높다
+    "solidity",          # 볼록껍질 채움비 — 사행하는 균열은 낮다
+    "waviness",          # 사행도 — 시공줄눈은 0에 가깝다
+    "contrast_mean",     # 국소 암부 세기
+    "contrast_cv",       # 암부 변동 — 균열은 깊이가 들쭉날쭉
+    "width_mean",        # 평균 폭(px)
+    "width_cv",          # 폭 변동계수 — 균열은 변하고 인쇄선/줄눈은 일정
+    "ridge_density",     # 중심선 화소 / 면적 — 가늘수록 크다
+    "branch_ratio",      # 분기점 비율 — 균열은 갈라진다
+    "orient_entropy",    # 국소 방향 엔트로피 — 직선 0, 균열 중간, 얼룩 최대
+)
+
+
+@dataclass
+class CrackFeatures:
+    values: np.ndarray                     # FEATURE_NAMES 순서
+
+    def as_dict(self) -> dict[str, float]:
+        return {k: float(v) for k, v in zip(FEATURE_NAMES, self.values)}
+
+
+def _branch_ratio(ridge: np.ndarray) -> float:
+    """중심선에서 이웃이 3개 이상인 화소의 비율 = 분기 정도."""
+    r = ridge.astype(np.uint8)
+    total = int(r.sum())
+    if total == 0:
+        return 0.0
+    kernel = np.array([[1, 1, 1], [1, 0, 1], [1, 1, 1]], np.uint8)
+    neigh = cv2.filter2D(r, -1, kernel, borderType=cv2.BORDER_CONSTANT)
+    return float(((neigh >= 3) & (r > 0)).sum()) / total
+
+
+def _orientation_entropy(ridge_pts: np.ndarray, bins: int = 8) -> float:
+    """국소 접선 방향의 분포 엔트로피 (0~1로 정규화).
+
+    완전 직선은 한 방향에 몰려 0에 가깝고, 사행하는 균열은 중간, 형태가 없는
+    얼룩은 방향이 고르게 퍼져 1에 가깝다.
+    """
+    if len(ridge_pts) < 6:
+        return 0.0
+    axis, _ = _principal_axis(ridge_pts)
+    order = np.argsort((ridge_pts - ridge_pts.mean(axis=0)) @ axis)
+    p = ridge_pts[order].astype(np.float32)
+    d = np.diff(p, axis=0)
+    n = np.linalg.norm(d, axis=1)
+    d = d[n > 1e-6]
+    if len(d) < 3:
+        return 0.0
+    ang = np.arctan2(d[:, 0], d[:, 1]) % np.pi        # 방향은 180도 주기
+    hist, _ = np.histogram(ang, bins=bins, range=(0.0, np.pi))
+    pr = hist / max(hist.sum(), 1)
+    pr = pr[pr > 0]
+    ent = float(-(pr * np.log(pr)).sum())
+    return ent / float(np.log(bins))
+
+
+def extract_features(
+    comp: np.ndarray,
+    ridge: np.ndarray,
+    ridge_pts: np.ndarray,
+    dark: np.ndarray,
+    widths_px: np.ndarray,
+    length_px: float,
+    bbox: tuple[int, int, int, int],
+) -> CrackFeatures:
+    x, y, w, h = bbox
+    area = float(comp.sum())
+    major, minor = float(max(w, h)), float(max(1, min(w, h)))
+    fill = area / float(max(w * h, 1))
+
+    cnts, _ = cv2.findContours(
+        comp.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+    )
+    hull_area = 0.0
+    for c in cnts:
+        if len(c) >= 3:
+            hull_area += float(cv2.contourArea(cv2.convexHull(c)))
+    solidity = area / hull_area if hull_area > 1e-6 else 1.0
+
+    dv = dark[comp].astype(np.float32)
+    c_mean = float(dv.mean()) if dv.size else 0.0
+    c_cv = float(dv.std() / c_mean) if c_mean > 1e-6 else 0.0
+
+    w_mean = float(widths_px.mean()) if widths_px.size else 0.0
+    w_cv = float(widths_px.std() / w_mean) if w_mean > 1e-6 else 0.0
+
+    values = np.array(
+        [
+            np.log1p(length_px),
+            np.log1p(area),
+            major / minor,
+            fill,
+            min(solidity, 2.0),
+            _waviness(ridge_pts),
+            c_mean / 64.0,
+            c_cv,
+            w_mean / 10.0,
+            w_cv,
+            float(ridge.sum()) / max(area, 1.0),
+            _branch_ratio(ridge),
+            _orientation_entropy(ridge_pts),
+        ],
+        np.float32,
+    )
+    return CrackFeatures(np.nan_to_num(values, nan=0.0, posinf=0.0, neginf=0.0))
+
+
+class FalsePositiveFilter:
+    """합성 데이터의 정답으로 학습한 오검출 판별기 (로지스틱 회귀).
+
+    형상 규칙을 손으로 늘리면 하나를 막을 때마다 다른 하나가 새는데, 규칙 간
+    가중치를 사람이 정할 근거가 없다. 정답이 있는 합성 표본으로 가중치를
+    학습시키면 그 근거가 데이터에서 나온다.
+
+    선형 모델을 쓴 이유는 계수를 눈으로 읽어 검증할 수 있기 때문이다.
+    안전 판정에 들어가는 구성요소는 설명 가능해야 한다.
+    """
+
+    def __init__(
+        self, mean: np.ndarray, std: np.ndarray, weights: np.ndarray, bias: float
+    ) -> None:
+        self.mean = mean
+        self.std = std
+        self.weights = weights
+        self.bias = bias
+
+    @classmethod
+    def load(cls, path: Path) -> "FalsePositiveFilter | None":
+        if not path.exists():
+            return None
+        try:
+            import json
+
+            d = json.loads(path.read_text(encoding="utf-8"))
+            if tuple(d.get("features", ())) != FEATURE_NAMES:
+                return None            # 특징 순서가 바뀌었으면 쓰지 않는다
+            return cls(
+                np.array(d["mean"], np.float32),
+                np.array(d["std"], np.float32),
+                np.array(d["weights"], np.float32),
+                float(d["bias"]),
+            )
+        except Exception:
+            return None
+
+    def score(self, feats: CrackFeatures) -> float:
+        """균열일 확률 (0~1)."""
+        z = (feats.values - self.mean) / np.where(self.std > 1e-9, self.std, 1.0)
+        logit = float(z @ self.weights + self.bias)
+        return float(1.0 / (1.0 + np.exp(-np.clip(logit, -30.0, 30.0))))
+
+
+DEFAULT_FP_MODEL = (
+    Path(__file__).resolve().parents[3] / "models" / "fp_filter.json"
+)
 
 
 def _ridge_points(dist: np.ndarray, mask: np.ndarray) -> np.ndarray:
@@ -334,10 +653,23 @@ class CrackDetector:
         sensitivity: float = 1.0,
         merge_gap_px: int = 3,
         min_contrast: float = 6.0,
-        psf_sigma_px: float = 2.6,
+        # MAD 이상치 제거를 도입하면서 재보정한 값. 이상치를 남긴 채 맞췄던
+        # 2.6은 과보정이 되어 폭을 계통적으로 과소평가했다(편향 -0.26mm).
+        # 2.2에서 편향이 -0.003mm로 사실상 0이 된다.
+        #
+        # 1.8을 쓰면 등급 일치율이 0.793으로 더 높지만 +0.16mm 과대평가가 남는다.
+        # 안전 쪽으로 치우친 값이라 유혹적이지만 채택하지 않았다 — 계측기는
+        # 편향이 없어야 하고, 보수적 여유는 측정값이 아니라 판정 기준이 갖는다.
+        psf_sigma_px: float = 2.2,
         min_sharpness: float = 45.0,
         min_waviness: float = 0.012,
-        min_confidence: float = 0.58,
+        min_confidence: float | None = None,
+        max_link_px: float = 26.0,
+        min_align: float = 0.80,
+        tile_threshold_px: int = 1600,
+        tile_size_px: int = 1024,
+        tile_overlap_px: int = 128,
+        fp_model: Path | None = None,
     ) -> None:
         self.min_length_px = min_length_px
         self.min_elongation = min_elongation
@@ -347,7 +679,21 @@ class CrackDetector:
         self.psf_sigma_px = psf_sigma_px
         self.min_sharpness = min_sharpness
         self.min_waviness = min_waviness
-        self.min_confidence = min_confidence
+        self.max_link_px = max_link_px
+        self.min_align = min_align
+        self.tile_threshold_px = tile_threshold_px
+        self.tile_size_px = tile_size_px
+        self.tile_overlap_px = tile_overlap_px
+        self.fp_filter = FalsePositiveFilter.load(fp_model or DEFAULT_FP_MODEL)
+        # 문턱은 신뢰도 점수의 출처에 따라 다르다. 학습 분류기의 확률과
+        # 휴리스틱 점수는 스케일이 달라 같은 값을 쓰면 한쪽이 반드시 어긋난다.
+        if min_confidence is not None:
+            self.min_confidence = min_confidence
+        else:
+            self.min_confidence = (
+                CLASSIFIER_CONFIDENCE if self.fp_filter is not None
+                else HEURISTIC_CONFIDENCE
+            )
 
     def detect(
         self, image: np.ndarray, mm_per_px: float | None = None
@@ -355,10 +701,45 @@ class CrackDetector:
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if image.ndim == 3 else image
         h, w = gray.shape[:2]
 
+        # 큰 원본은 타일로 나눠 원해상도로 처리한다. 통째로 축소하면 미세 균열이
+        # 리샘플링에서 사라지고, 통째로 처리하면 적응 임계가 전역 통계에 눌려
+        # 국부적으로 옅은 균열을 놓친다.
+        if max(h, w) > self.tile_threshold_px:
+            return self._detect_tiled(gray, mm_per_px)
+
         sharp = sharpness_score(gray)
-        mask, dark, normal = _segment(gray, self.sensitivity)
-        n_labels, labels = _group_components(mask, self.merge_gap_px)
+        mask, _, _ = _segment(gray, self.sensitivity)
+        result = self._detect_from_mask(gray, mask, mm_per_px)
+
+        quality_ok = sharp >= self.min_sharpness
+        result.sharpness = round(sharp, 1)
+        result.quality_ok = quality_ok
+        result.quality_note = (
+            ""
+            if quality_ok
+            else f"선명도 부족 (Laplacian var {sharp:.0f} < {self.min_sharpness:.0f}) "
+                 "— 균열폭이 과대평가될 수 있어 재촬영을 권고합니다"
+        )
+        return result
+
+    def _detect_from_mask(
+        self, gray: np.ndarray, mask: np.ndarray, mm_per_px: float | None
+    ) -> DetectionResult:
+        """주어진 균열 마스크로부터 인스턴스를 만든다.
+
+        단일 이미지 경로와 타일 병합 경로가 이 함수를 공유한다. 두 경로가 서로
+        다른 인스턴스 생성 규칙을 갖게 되면 타일 경계에서만 결과가 달라진다.
+        """
+        h, w = gray.shape[:2]
+        eq = _equalize(gray)
+        _, normal = _ridge_response(eq, scales=(1.0, 2.0, 3.5, 5.0))
+        dark = _dark_field(eq)
+
         dist = cv2.distanceTransform(mask, cv2.DIST_L2, 5)
+        # 근접이 아니라 방향 일치로 잇는다 — 나란한 별개 균열이 뭉치지 않는다
+        n_labels, labels = _link_fragments(
+            mask, dist, self.max_link_px, self.min_align
+        )
 
         cracks: list[CrackInstance] = []
         kept_mask = np.zeros_like(mask)
@@ -396,14 +777,29 @@ class CrackDetector:
             spans_frame = major > 0.55 * max(h, w)
             if spans_frame and _waviness(ridge_pts) < self.min_waviness:
                 continue
+
             widths = _fwhm_widths(dark, ridge_pts, normal)
             if widths.size >= 3:
-                widths = deconvolve_width(widths, self.psf_sigma_px)
+                # 분기 교차점·끝단에서 튀는 값을 MAD로 걷어낸 뒤 PSF를 보정한다.
+                # 순서가 중요하다 — 이상치를 남긴 채 보정하면 이상치도 함께 보정된다.
+                widths = deconvolve_width(
+                    robust_widths(widths), self.psf_sigma_px
+                )
             else:
                 # 프로파일이 불안정하면 거리변환 근사로 되돌린다
                 widths = 2.0 * comp_dist[ridge]
             if widths.size == 0:
                 continue
+
+            feats = extract_features(
+                comp, ridge, ridge_pts, dark, widths, length_px, (x, y, cw, ch)
+            )
+            if self.fp_filter is not None:
+                confidence = self.fp_filter.score(feats)
+            else:
+                confidence = self._confidence(
+                    elongation, fill_ratio, length_px, contrast
+                )
 
             inst = CrackInstance(
                 bbox=(x, y, cw, ch),
@@ -413,10 +809,9 @@ class CrackDetector:
                 width_px_mean=round(float(widths.mean()), 2),
                 area_px=area,
                 elongation=round(float(elongation), 2),
-                confidence=round(
-                    self._confidence(elongation, fill_ratio, length_px, contrast), 3
-                ),
+                confidence=round(float(confidence), 3),
                 polyline=_polyline_from_component(ridge_pts),
+                features=feats.as_dict(),
             )
             if inst.confidence < self.min_confidence:
                 continue
@@ -425,22 +820,87 @@ class CrackDetector:
             kept_mask[comp] = 255
 
         cracks.sort(key=lambda c: -(c.width_px_p95 * c.length_px))
-        quality_ok = sharp >= self.min_sharpness
+        # 선명도 판정은 호출자가 채운다 — 타일 경로는 원본 전체로 재야 한다
         return DetectionResult(
             cracks=cracks,
             mask=kept_mask,
             image_size=(h, w),
             crack_area_ratio=float(np.count_nonzero(kept_mask)) / float(h * w),
             mm_per_px=mm_per_px,
-            sharpness=round(sharp, 1),
-            quality_ok=quality_ok,
-            quality_note=(
-                ""
-                if quality_ok
-                else f"선명도 부족 (Laplacian var {sharp:.0f} < {self.min_sharpness:.0f}) "
-                     "— 균열폭이 과대평가될 수 있어 재촬영을 권고합니다"
-            ),
         )
+
+    # ─── 타일 기반 다중해상도 ──────────────────────────────────
+    def _detect_tiled(
+        self, gray: np.ndarray, mm_per_px: float | None
+    ) -> DetectionResult:
+        """겹치는 타일로 나눠 원해상도로 검출한 뒤 좌표를 되돌려 병합한다.
+
+        타일 경계에 걸친 균열은 양쪽에서 잘려 두 건으로 잡힌다. 겹침 폭을 두고,
+        병합 단계에서 중심선이 맞닿는 조각을 다시 잇는다.
+        """
+        h, w = gray.shape[:2]
+        step = max(64, self.tile_size_px - self.tile_overlap_px)
+
+        full_mask = np.zeros((h, w), np.uint8)
+        sharp = sharpness_score(gray)
+
+        # 타일 안에서는 재귀하지 않도록 임계를 크게 잡은 복제 검출기를 쓴다
+        inner = CrackDetector(
+            min_length_px=self.min_length_px,
+            min_elongation=self.min_elongation,
+            sensitivity=self.sensitivity,
+            merge_gap_px=self.merge_gap_px,
+            min_contrast=self.min_contrast,
+            psf_sigma_px=self.psf_sigma_px,
+            min_sharpness=0.0,
+            min_waviness=self.min_waviness,
+            min_confidence=self.min_confidence,
+            max_link_px=self.max_link_px,
+            min_align=self.min_align,
+            tile_threshold_px=10**9,
+        )
+        inner.fp_filter = self.fp_filter
+
+        for y0 in range(0, max(h - self.tile_overlap_px, 1), step):
+            for x0 in range(0, max(w - self.tile_overlap_px, 1), step):
+                y1 = min(y0 + self.tile_size_px, h)
+                x1 = min(x0 + self.tile_size_px, w)
+                if (y1 - y0) < 64 or (x1 - x0) < 64:
+                    continue
+                sub = inner.detect(gray[y0:y1, x0:x1], mm_per_px)
+                full_mask[y0:y1, x0:x1] = np.maximum(
+                    full_mask[y0:y1, x0:x1], sub.mask
+                )
+
+        # 병합된 마스크에서 인스턴스를 다시 만든다. 타일 경계에서 잘린 조각이
+        # 여기서 하나로 이어진다 — 타일마다 나온 결과를 그냥 합치면 중복이 남는다.
+        merged = CrackDetector(
+            min_length_px=self.min_length_px,
+            min_elongation=self.min_elongation,
+            sensitivity=self.sensitivity,
+            merge_gap_px=self.merge_gap_px,
+            min_contrast=0.0,          # 이미 통과한 화소만 남아 있다
+            psf_sigma_px=self.psf_sigma_px,
+            min_sharpness=0.0,
+            min_waviness=self.min_waviness,
+            min_confidence=self.min_confidence,
+            max_link_px=self.max_link_px,
+            min_align=self.min_align,
+            tile_threshold_px=10**9,
+        )
+        merged.fp_filter = self.fp_filter
+        result = merged._detect_from_mask(gray, full_mask, mm_per_px)
+
+        quality_ok = sharp >= self.min_sharpness
+        result.sharpness = round(sharp, 1)
+        result.quality_ok = quality_ok
+        result.quality_note = (
+            ""
+            if quality_ok
+            else f"선명도 부족 (Laplacian var {sharp:.0f} < {self.min_sharpness:.0f}) "
+                 "— 균열폭이 과대평가될 수 있어 재촬영을 권고합니다"
+        )
+        return result
 
     @staticmethod
     def _confidence(

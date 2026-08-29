@@ -6,9 +6,11 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import HTMLResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -16,6 +18,7 @@ from .. import bhc
 from ..db import get_db
 from ..domain import MEMBER_CLASSES, DefectType, Environment
 from ..models import Building, Defect, Inspection
+from ..checkup_report import ReportContext, render as render_checkup_report
 from ..opinion import build_sentences, build_summary, lint_opinion, system_comment
 
 router = APIRouter(prefix="/api/bhc", tags=["bhc"])
@@ -147,17 +150,34 @@ def severity_scale() -> dict:
     }
 
 
-@router.get("/{building_id}")
-def checkup(
+@dataclass
+class Assembled:
+    """검진 1회 판정에 필요한 모든 산출물. JSON 응답과 소견서가 이걸 공유한다."""
+
+    building: Building
+    inspection: Inspection
+    index: int
+    environment: Environment
+    cohort: str
+    observations: list[bhc.DefectObservation]
+    result: bhc.CheckupResult
+    rate_uncapped: bhc.DeteriorationRate
+    prev_result: bhc.CheckupResult | None
+    prev_scores: dict
+    surveyed_per_member: int
+
+
+def _assemble(
     building_id: int,
-    inspection_id: int | None = None,
-    surveyed_per_member: int = Query(
-        DEFAULT_SURVEYED_PER_MEMBER, ge=1, le=1000,
-        description="확산도 ρ 산정에 쓰는 조사 동종 부재 수 (가정값)",
-    ),
-    db: Session = Depends(get_db),
-) -> dict:
-    """검진 1회의 종합 판정 — BHI · 적신호 · 건강나이 · 열화속도 · 처방 · 소견."""
+    inspection_id: int | None,
+    surveyed_per_member: int,
+    db: Session,
+) -> Assembled:
+    """DB에서 검진 판정을 조립한다.
+
+    JSON 엔드포인트와 소견서가 같은 함수를 쓴다. 둘이 따로 조립하면 화면과
+    발행 문서의 숫자가 달라지는데, 안전 판정에서 그건 치명적이다.
+    """
     b = db.get(Building, building_id)
     if not b:
         raise HTTPException(404, "건축물을 찾을 수 없습니다")
@@ -216,6 +236,56 @@ def checkup(
         result.health_age.beta,
     )
 
+    return Assembled(
+        building=b,
+        inspection=current,
+        index=idx,
+        environment=environment,
+        cohort=cohort,
+        observations=obs,
+        result=result,
+        rate_uncapped=rate_uncapped,
+        prev_result=prev_result,
+        prev_scores=(
+            {s.system: s.score for s in prev_result.systems} if prev_result else {}
+        ),
+        surveyed_per_member=surveyed_per_member,
+    )
+
+
+def _inspection_meta(a: Assembled) -> dict:
+    kind_code = {
+        "regular": "BAS", "precise": "ADV", "diagnosis": "ADV", "emergency": "TGT",
+    }.get(a.inspection.kind, "BAS")
+    return {
+        "id": a.inspection.id,
+        "at": a.inspection.inspected_at.isoformat(),
+        "kind": a.inspection.kind,
+        "statutory_grade": a.inspection.safety_grade,
+        "checkup_id": bhc.checkup_id(
+            str(a.building.id), a.inspection.inspected_at.year, kind_code, a.index + 1
+        ),
+        "level": bhc.KIND_TO_LEVEL.get(kind_code, "L1"),
+    }
+
+
+@router.get("/{building_id}")
+def checkup(
+    building_id: int,
+    inspection_id: int | None = None,
+    surveyed_per_member: int = Query(
+        DEFAULT_SURVEYED_PER_MEMBER, ge=1, le=1000,
+        description="확산도 ρ 산정에 쓰는 조사 동종 부재 수 (가정값)",
+    ),
+    db: Session = Depends(get_db),
+) -> dict:
+    """검진 1회의 종합 판정 — BHI · 적신호 · 건강나이 · 열화속도 · 처방 · 소견."""
+    a = _assemble(building_id, inspection_id, surveyed_per_member, db)
+    b, current, result = a.building, a.inspection, a.result
+    obs, environment = a.observations, a.environment
+    rate_uncapped, prev_scores = a.rate_uncapped, a.prev_scores
+    cohort = a.cohort
+
     summary = build_summary(
         result,
         building_name=b.name,
@@ -223,29 +293,10 @@ def checkup(
     )
     sentences = build_sentences(obs, result.prescriptions, environment)
 
-    prev_scores = (
-        {s.system: s.score for s in prev_result.systems} if prev_result else {}
-    )
-
     return {
         "standard": result.standard,
         "building": {"id": b.id, "name": b.name, "cohort": cohort},
-        "inspection": {
-            "id": current.id,
-            "at": current.inspected_at.isoformat(),
-            "kind": current.kind,
-            "statutory_grade": current.safety_grade,
-            "checkup_id": bhc.checkup_id(
-                str(b.id), current.inspected_at.year,
-                {"regular": "BAS", "precise": "ADV",
-                 "diagnosis": "ADV", "emergency": "TGT"}.get(current.kind, "BAS"),
-                idx + 1,
-            ),
-            "level": bhc.KIND_TO_LEVEL.get(
-                {"regular": "BAS", "precise": "ADV",
-                 "diagnosis": "ADV", "emergency": "TGT"}.get(current.kind, "BAS"), "L1"
-            ),
-        },
+        "inspection": _inspection_meta(a),
         "bhi": result.bhi,
         "bhi_raw": result.bhi_raw,
         "grade": result.grade,
@@ -424,3 +475,48 @@ def capa_board(
             "거쳐야 한다고 규정합니다."
         ),
     }
+
+
+@router.get("/{building_id}/report", response_class=HTMLResponse)
+def checkup_report(
+    building_id: int,
+    inspection_id: int | None = None,
+    surveyed_per_member: int = Query(DEFAULT_SURVEYED_PER_MEMBER, ge=1, le=1000),
+    reviewer: str = Query("", description="책임기술자 검토 기록 (비우면 미검토로 표기)"),
+    db: Session = Depends(get_db),
+) -> HTMLResponse:
+    """건축물 건강소견서 — BHC-STD-2026 §9 의 5부 구성.
+
+    제1부 1면 요약은 표준이 단일 페이지를 요구하므로 인쇄 시 page-break 로 강제한다.
+    """
+    a = _assemble(building_id, inspection_id, surveyed_per_member, db)
+    summary = build_summary(
+        a.result,
+        building_name=a.building.name,
+        statutory_grade=a.inspection.safety_grade,
+    )
+    ctx = ReportContext(
+        building={"id": a.building.id, "name": a.building.name},
+        inspection=_inspection_meta(a),
+        result=a.result,
+        observations=a.observations,
+        summary_lines={
+            "grade_line": summary.grade_line,
+            "health_age_line": summary.health_age_line,
+            "rate_line": summary.rate_line,
+            "red_flag_line": summary.red_flag_line,
+            "prescription_line": summary.prescription_line,
+            "next_checkup_line": summary.next_checkup_line,
+            "caveats": summary.caveats + [
+                f"확산도 ρ 는 조사 동종 부재 수를 {a.surveyed_per_member}개로 가정해 "
+                "산정했습니다. 표본계획 도입 시 실제 조사 부재 수로 대체해야 합니다."
+            ],
+        },
+        sentences=build_sentences(a.observations, a.result.prescriptions, a.environment),
+        environment=a.environment,
+        statutory_grade=a.inspection.safety_grade,
+        prev_scores=a.prev_scores,
+        surveyed_per_member=a.surveyed_per_member,
+        reviewer=reviewer,
+    )
+    return HTMLResponse(render_checkup_report(ctx))

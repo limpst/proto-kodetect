@@ -226,9 +226,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--min-length", type=int, default=40)
     p.add_argument("--min-contrast", type=float, default=6.0)
     p.add_argument("--merge-gap", type=int, default=3)
-    p.add_argument("--psf", type=float, default=2.6)
+    p.add_argument("--psf", type=float, default=2.2)
     p.add_argument("--waviness", type=float, default=0.012)
-    p.add_argument("--min-conf", type=float, default=0.58)
+    p.add_argument("--min-conf", type=float, default=None,
+                   help="비우면 검출기 기본값 (분류기 있으면 0.30)")
     a = p.parse_args(argv)
 
     report = evaluate(
