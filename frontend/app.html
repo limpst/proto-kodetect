@@ -21,6 +21,7 @@
     <nav class="nav" id="nav">
       <div class="group">진단</div>
       <a href="#overview"    data-view="overview"><span class="ico">▤</span> 개요</a>
+      <a href="#bhc"         data-view="bhc"><span class="ico">🩺</span> 건강검진</a>
       <a href="#detect"      data-view="detect"><span class="ico">◈</span> 균열 분석</a>
       <a href="#progression" data-view="progression"><span class="ico">◔</span> 시계열 진행</a>
 
@@ -81,6 +82,78 @@
           <div class="card">
             <h2>점검 이력</h2>
             <div class="table-wrap table-scroll"><table id="ovInspections"></table></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── 건강검진 (BHC-STD-2026) ── -->
+      <section class="view" id="view-bhc">
+        <div id="bhcFlags"></div>
+
+        <div class="row wide-left">
+          <div class="card">
+            <h2>종합 건강지수 <span class="hint" id="bhcStd"></span></h2>
+            <div class="bhi-wrap">
+              <div id="bhcGauge"></div>
+              <div class="bhi-side" id="bhcSummary"></div>
+            </div>
+          </div>
+          <div class="card">
+            <h2>6대 계통 <span class="hint">BHC-STD-2026 §4.2</span></h2>
+            <div id="bhcRadar"></div>
+          </div>
+        </div>
+
+        <div class="row c3">
+          <div class="card">
+            <h2>건강나이</h2>
+            <div id="bhcAge"></div>
+          </div>
+          <div class="card">
+            <h2>열화속도 <span class="hint">§8.8</span></h2>
+            <div id="bhcRate"></div>
+          </div>
+          <div class="card">
+            <h2>심각도 분포 <span class="hint">§8.1</span></h2>
+            <div id="bhcSeverity"></div>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="card">
+            <h2>계통별 소견 <span class="hint">§9.1 제2부 · 전회 대비 증감</span></h2>
+            <div class="table-wrap"><table id="bhcSystems"></table></div>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="card">
+            <h2>시정조치 폐루프 (CAPA) <span class="hint" id="bhcCapaMetrics"></span></h2>
+            <div class="capa-board" id="bhcCapa"></div>
+            <div class="note" id="bhcCapaNote" style="margin-top:12px"></div>
+          </div>
+        </div>
+
+        <div class="row wide-left">
+          <div class="card">
+            <h2>소견 문장 <span class="hint">§9.2 관측 · 해석 · 권고 분리</span></h2>
+            <div class="table-scroll" id="bhcSentences"></div>
+          </div>
+          <div class="card">
+            <h2>금지표현 검사 <span class="hint">§9.2</span></h2>
+            <textarea id="bhcLintText" rows="4" style="width:100%"
+              placeholder="소견 문장을 붙여넣으면 표준이 금지한 표현을 찾아줍니다."></textarea>
+            <div class="field-row" style="margin-top:8px">
+              <button class="primary" id="bhcLintRun">검사</button>
+            </div>
+            <div id="bhcLintOut"></div>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="card">
+            <h2>판정 전제 및 주의사항</h2>
+            <div id="bhcCaveats"></div>
           </div>
         </div>
       </section>
@@ -274,6 +347,7 @@
 <script src="/static/js/core.js"></script>
 <script src="/static/js/charts.js"></script>
 <script src="/static/js/view3d.js"></script>
+<script src="/static/js/bhc.js"></script>
 <script src="/static/js/views.js"></script>
 </body>
 </html>

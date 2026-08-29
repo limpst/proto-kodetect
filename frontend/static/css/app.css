@@ -303,3 +303,102 @@ td.nowrap { white-space: nowrap; }
 .spin { display: inline-block; width: 13px; height: 13px; border: 2px solid var(--line);
         border-top-color: var(--accent); border-radius: 50%; animation: sp .7s linear infinite; }
 @keyframes sp { to { transform: rotate(360deg); } }
+
+/* ============================================================
+   건강검진 (BHC-STD-2026) 화면
+   ============================================================ */
+
+/* ─── BHI 게이지 ──────────────────────────────────────────── */
+.bhi-wrap { display: flex; gap: 20px; align-items: flex-start; flex-wrap: wrap; }
+.bhi-wrap > #bhcGauge { flex: 0 0 260px; }
+.bhi-side { flex: 1 1 260px; min-width: 0; }
+.bhi-grade { display: flex; align-items: center; gap: 14px; }
+.bhi-label { font-size: 17px; font-weight: 700; letter-spacing: -0.01em; }
+
+/* ─── 적신호 배너 ─────────────────────────────────────────── */
+.rf-banner {
+  border: 1px solid rgba(239, 68, 68, .45);
+  background: linear-gradient(180deg, rgba(239,68,68,.10), rgba(239,68,68,.04));
+  border-radius: var(--radius); padding: 14px 16px; margin-bottom: 14px;
+}
+.rf-head {
+  font-size: 13.5px; font-weight: 650; color: #fca5a5;
+  display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap;
+}
+.rf-head b { color: #fff; }
+.rf-note {
+  margin-left: auto; font-size: 11px; font-weight: 400; color: var(--text-mute);
+}
+.rf-list { display: grid; gap: 8px; margin-top: 12px; }
+.rf-item {
+  display: flex; gap: 10px; align-items: flex-start;
+  background: var(--panel-2); border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm); padding: 9px 11px;
+}
+.rf-body { min-width: 0; }
+.rf-cond { font-size: 12.5px; }
+.rf-meta { font-size: 11.5px; color: var(--text-dim); margin-top: 3px; }
+.rf-ev {
+  margin-top: 5px; color: var(--text-mute); line-height: 1.6;
+  max-height: 72px; overflow-y: auto;
+}
+
+/* ─── 심각도 분포 ─────────────────────────────────────────── */
+.sev-row {
+  display: grid; grid-template-columns: 26px 34px 1fr 40px;
+  align-items: center; gap: 8px; margin-bottom: 7px;
+}
+.sev-key { font-weight: 800; font-size: 12px; }
+.sev-name { font-size: 11px; color: var(--text-dim); }
+.sev-n { text-align: right; font-size: 12.5px; font-weight: 600; }
+
+/* ─── CAPA 보드 ───────────────────────────────────────────── */
+.capa-board {
+  display: grid; grid-template-columns: repeat(6, minmax(150px, 1fr));
+  gap: 10px; overflow-x: auto; padding-bottom: 4px;
+}
+@media (max-width: 1200px) {
+  .capa-board { grid-template-columns: repeat(3, minmax(150px, 1fr)); }
+}
+.capa-col {
+  background: var(--panel-2); border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm); padding: 8px; min-width: 0;
+}
+.capa-col-head {
+  font-size: 11px; font-weight: 700; color: var(--text-dim);
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 2px 2px 8px; border-bottom: 1px solid var(--line-soft); margin-bottom: 8px;
+}
+.capa-col-head .num { color: #fff; font-size: 12.5px; }
+.capa-card {
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius-sm); padding: 8px 9px; margin-bottom: 7px;
+}
+.capa-card.esc { border-color: rgba(239, 68, 68, .5); background: rgba(239,68,68,.06); }
+.capa-top { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+.capa-top .sev { font-size: 11.5px; font-weight: 800; }
+.capa-id { margin-top: 5px; color: var(--text-dim); font-size: 10.5px;
+           overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.capa-member { font-size: 11.5px; margin-top: 2px; }
+.capa-due { font-size: 11px; color: var(--text-dim); margin-top: 5px;
+            display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.capa-due b { color: #fff; }
+.capa-esc { font-size: 10.5px; color: #fca5a5; margin-top: 5px; line-height: 1.5; }
+.capa-empty { color: var(--text-mute); font-size: 11px; text-align: center; padding: 10px 0; }
+
+/* ─── 소견 3요소 ──────────────────────────────────────────── */
+.op-card {
+  border: 1px solid var(--line-soft); border-radius: var(--radius-sm);
+  padding: 10px 12px; margin-bottom: 9px; background: var(--panel-2);
+}
+.op-id { color: var(--text-dim); font-size: 10.5px; margin-bottom: 7px; }
+.op-row { display: flex; gap: 9px; margin-bottom: 5px; font-size: 12.5px; line-height: 1.65; }
+.op-row > span:last-child { min-width: 0; }
+.op-tag {
+  flex: 0 0 34px; height: 19px; border-radius: 4px; font-size: 10.5px;
+  font-weight: 700; display: inline-flex; align-items: center;
+  justify-content: center; color: #08121c;
+}
+.op-tag.obs { background: #7dd3fc; }
+.op-tag.itp { background: #a78bfa; }
+.op-tag.rec { background: #fbbf24; }

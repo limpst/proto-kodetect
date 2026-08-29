@@ -117,6 +117,7 @@ function chip(label, value, unit = "", tone = "") {
 /* ─── 라우팅 ────────────────────────────────────────────── */
 const VIEW_TITLES = {
   overview: "개요",
+  bhc: "건강검진 (BHC-STD-2026)",
   detect: "균열 분석",
   progression: "시계열 진행",
   live: "실시간 계측",

@@ -1,0 +1,113 @@
+{
+  "name": "KO-Detect · 04 CAPA 감시 (처방 기한·에스컬레이션)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "cronExpression", "expression": "7 8 * * *" }] }
+      },
+      "id": "trg",
+      "name": "매일 08:07",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-460, 260],
+      "notes": "정각을 피한다 — 모든 시스템이 :00에 몰리면 외부 API가 레이트리밋에 걸린다"
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.KODETECT_API }}/api/auth/login",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"username\": \"{{ $env.KODETECT_USER }}\", \"password\": \"{{ $env.KODETECT_PASSWORD }}\"}",
+        "options": { "response": { "response": { "fullResponse": true } } }
+      },
+      "id": "auth",
+      "name": "세션 획득",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-240, 260]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.KODETECT_API }}/api/buildings",
+        "options": {}
+      },
+      "id": "buildings",
+      "name": "시설물 목록",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-20, 260]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.KODETECT_API }}/api/bhc/{{ $json.id }}/capa",
+        "options": {}
+      },
+      "id": "capa",
+      "name": "처방 폐루프 조회",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [200, 260]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 에스컬레이션 단계별로 분류한다.\n// BHC-STD §10.3 — E1 담당자 / E2 대표 서면 / E3 S6 계상·RF-7 / E4 관계기관\n// P0는 24시간 기준이라 기한 초과가 아니어도 착수 지연만으로 E2·E4가 발동한다.\nconst LEVEL_RANK = { E1: 1, E2: 2, E3: 3, E4: 4 };\nconst out = [];\n\nfor (const item of $input.all()) {\n  const d = item.json;\n  const rows = (d.prescriptions || []).filter(r => r.escalation || r.days_overdue > 0);\n  if (!rows.length) continue;\n\n  const worst = rows.reduce((a, r) => {\n    const lv = r.escalation?.level ?? 'E1';\n    return LEVEL_RANK[lv] > LEVEL_RANK[a] ? lv : a;\n  }, 'E1');\n\n  out.push({\n    json: {\n      building_id: d.building_id,\n      worst_level: worst,\n      total: rows.length,\n      p0: rows.filter(r => r.priority === 'P0').length,\n      overdue_max: Math.max(...rows.map(r => r.days_overdue || 0)),\n      rows: rows.slice(0, 12),\n      metrics: d.metrics,\n    },\n  });\n}\nreturn out;"
+      },
+      "id": "classify",
+      "name": "에스컬레이션 분류",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [420, 260]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 발송 문안 — 파일·수치만 던지지 않는다.\n// (1) 무엇이 몇 건인지 (2) 핵심 수치 (3) 유의점 (4) 무엇부터 볼지\nconst URGENT = new Set(['E3', 'E4']);\nreturn $input.all().map(i => {\n  const d = i.json;\n  const head = URGENT.has(d.worst_level) ? ':rotating_light:' : ':warning:';\n  const lines = [\n    `${head} *CAPA 에스컬레이션 — 시설물 #${d.building_id}*`,\n    `• 대상 처방 ${d.total}건 · P0 ${d.p0}건 · 최대 기한초과 ${d.overdue_max}일`,\n    `• 최고 단계 *${d.worst_level}*`,\n    '',\n    '*조치가 필요한 처방*',\n    ...d.rows.map(r =>\n      `  · ${r.priority} ${r.defect_id} (${r.member_label}) — 기한 ${r.due_date ?? '차기검진'}` +\n      (r.days_overdue > 0 ? ` · ${r.days_overdue}일 초과` : '') +\n      (r.escalation ? ` · ${r.escalation.level} ${r.escalation.action}` : '')),\n    '',\n    '*유의점*',\n    '  · 이행(Executed)만으로는 종결되지 않습니다. 검증(Verified)을 거쳐야 합니다 (§10.1)',\n    '  · P0는 소견서 완성 여부와 무관하게 즉시 통보 대상입니다 (§9.3)',\n    '',\n    `*무엇부터* 최고 단계 ${d.worst_level} 항목부터 처리하십시오.`,\n  ];\n  return { json: { ...d, text: lines.join('\\n') } };\n});"
+      },
+      "id": "compose",
+      "name": "통보 문안 작성",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [640, 260]
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": { "__rl": true, "value": "={{ $env.SLACK_CHANNEL_CAPA }}", "mode": "id" },
+        "text": "={{ $json.text }}",
+        "otherOptions": {}
+      },
+      "id": "slack",
+      "name": "Slack 통보",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [880, 200]
+    },
+    {
+      "parameters": {
+        "operation": "write",
+        "fileName": "=/data/catalog/capa_escalation/{{ $now.format('yyyyMM') }}.jsonl",
+        "options": { "append": true }
+      },
+      "id": "log",
+      "name": "에스컬레이션 이력 적재",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [880, 340]
+    }
+  ],
+  "connections": {
+    "매일 08:07": { "main": [[{ "node": "세션 획득", "type": "main", "index": 0 }]] },
+    "세션 획득": { "main": [[{ "node": "시설물 목록", "type": "main", "index": 0 }]] },
+    "시설물 목록": { "main": [[{ "node": "처방 폐루프 조회", "type": "main", "index": 0 }]] },
+    "처방 폐루프 조회": { "main": [[{ "node": "에스컬레이션 분류", "type": "main", "index": 0 }]] },
+    "에스컬레이션 분류": { "main": [[{ "node": "통보 문안 작성", "type": "main", "index": 0 }]] },
+    "통보 문안 작성": {
+      "main": [[
+        { "node": "Slack 통보", "type": "main", "index": 0 },
+        { "node": "에스컬레이션 이력 적재", "type": "main", "index": 0 }
+      ]]
+    }
+  },
+  "settings": { "executionOrder": "v1", "timezone": "Asia/Seoul" },
+  "tags": [{ "name": "kodetect" }, { "name": "capa" }]
+}

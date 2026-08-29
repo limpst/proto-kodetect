@@ -1,0 +1,115 @@
+{
+  "name": "KO-Detect · 05 일일 진행 보고 (Slack)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "cronExpression", "expression": "7 18 * * 1-5" }] }
+      },
+      "id": "trg",
+      "name": "평일 18:07",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-460, 260]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "kodetect/progress",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "hook",
+      "name": "수동 실행 웹훅",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-460, 420],
+      "notes": "헤르메스 에이전트가 임의 시점에 진행 보고를 요청할 때 쓰는 입구"
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.KODETECT_API }}/api/auth/login",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"username\": \"{{ $env.KODETECT_USER }}\", \"password\": \"{{ $env.KODETECT_PASSWORD }}\"}",
+        "options": { "response": { "response": { "fullResponse": true } } }
+      },
+      "id": "auth",
+      "name": "세션 획득",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-240, 320]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.KODETECT_API }}/api/buildings",
+        "options": {}
+      },
+      "id": "buildings",
+      "name": "시설물 목록",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-20, 320]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.KODETECT_API }}/api/bhc/{{ $json.id }}",
+        "options": {}
+      },
+      "id": "bhc",
+      "name": "건강검진 결과",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [200, 320]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 사내 공통 발송 문안 규칙:\n// 파일·링크만 던지지 않는다. (1) 무엇이 몇 건 (2) 핵심 수치 (3) 유의점 (4) 읽는 순서.\nconst rows = $input.all().map(i => i.json);\n\nconst tot = rows.reduce((a, d) => {\n  a.flags += (d.red_flags || []).length;\n  a.p0 += (d.prescriptions || []).filter(p => p.priority === 'P0').length;\n  a.p1 += (d.prescriptions || []).filter(p => p.priority === 'P1').length;\n  a.defects += d.prescriptions?.length ?? 0;\n  return a;\n}, { flags: 0, p0: 0, p1: 0, defects: 0 });\n\nconst lines = [\n  `*KO-Detect 진행 보고 — ${$now.format('yyyy-MM-dd')}*`,\n  '',\n  `• 시설물 ${rows.length}동 · 처방 ${tot.defects}건`,\n  `• 적신호 ${tot.flags}건 · P0(응급) ${tot.p0}건 · P1(긴급) ${tot.p1}건`,\n  '',\n  '*시설물별 현황*',\n  ...rows.map(d => {\n    const f = (d.red_flags || []).map(x => x.code).join(',');\n    const dev = d.health_age?.deviation;\n    return `  · ${d.building.name} — 법정 ${d.inspection.statutory_grade ?? '—'} / ` +\n           `BHI ${d.bhi.toFixed(1)} (${d.grade})` +\n           (f ? ` :warning: ${f}` : '') +\n           (dev != null ? ` · 노화편차 ${dev > 0 ? '+' : ''}${dev.toFixed(1)}년` : '');\n  }),\n  '',\n  '*유의점*',\n  ...(tot.p0 ? [`  · P0 처방 ${tot.p0}건은 소견서와 무관하게 즉시 통보 대상입니다 (§9.3)`] : []),\n  '  · AI 판정은 보조 참고자료이며 책임기술자 확인·서명이 필요합니다',\n  '  · 상시 계측은 시뮬레이션이며 실계측기 데이터가 아닙니다',\n  '',\n  '*읽는 순서* 적신호 → P0 처방 → 노화편차 순으로 보십시오.',\n  '자세한 기록은 저장소 `docs/DAILY_UPDATE_<yyyymmdd>.md` 에 있습니다.',\n];\n\nreturn [{ json: { text: lines.join('\\n'), totals: tot, count: rows.length } }];"
+      },
+      "id": "compose",
+      "name": "보고 문안 작성",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 320]
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": { "__rl": true, "value": "={{ $env.SLACK_CHANNEL_PROGRESS }}", "mode": "id" },
+        "text": "={{ $json.text }}",
+        "otherOptions": {}
+      },
+      "id": "slack",
+      "name": "Slack 진행 보고",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [680, 260]
+    },
+    {
+      "parameters": {
+        "command": "=cd {{ $env.KODETECT_REPO || '/repo' }} && python -m scripts.daily_update"
+      },
+      "id": "docgen",
+      "name": "DAILY UPDATE 문서 생성",
+      "type": "n8n-nodes-base.executeCommand",
+      "typeVersion": 1,
+      "position": [680, 400],
+      "notes": "저장소가 마운트된 환경에서만 동작. 없으면 이 노드를 비활성화하고 Slack만 쓴다."
+    }
+  ],
+  "connections": {
+    "평일 18:07": { "main": [[{ "node": "세션 획득", "type": "main", "index": 0 }]] },
+    "수동 실행 웹훅": { "main": [[{ "node": "세션 획득", "type": "main", "index": 0 }]] },
+    "세션 획득": { "main": [[{ "node": "시설물 목록", "type": "main", "index": 0 }]] },
+    "시설물 목록": { "main": [[{ "node": "건강검진 결과", "type": "main", "index": 0 }]] },
+    "건강검진 결과": { "main": [[{ "node": "보고 문안 작성", "type": "main", "index": 0 }]] },
+    "보고 문안 작성": {
+      "main": [[
+        { "node": "Slack 진행 보고", "type": "main", "index": 0 },
+        { "node": "DAILY UPDATE 문서 생성", "type": "main", "index": 0 }
+      ]]
+    }
+  },
+  "settings": { "executionOrder": "v1", "timezone": "Asia/Seoul" },
+  "tags": [{ "name": "kodetect" }, { "name": "report" }]
+}

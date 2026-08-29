@@ -561,6 +561,7 @@ window.onViewShown = function (view) {
     State.loaded[key] = true;
     fn().catch((e) => console.error(key, e));
   };
+  if (view === "bhc") once("bhc", loadBhc);
   if (view === "progression") once("progression", loadProgression);
   if (view === "live") once("live", loadLive);
   if (view === "view3d") once("view3d", load3D);
