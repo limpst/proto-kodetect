@@ -50,6 +50,21 @@ class Settings(BaseSettings):
     def overlays_dir(self) -> Path:
         return self.storage_dir / "overlays"
 
+    @property
+    def sqlalchemy_url(self) -> str:
+        """관리형 Postgres가 주는 URL을 SQLAlchemy 드라이버 형식으로 정규화한다.
+
+        Render·Heroku 등은 `postgres://...` 를 주는데 SQLAlchemy 2.x는 이 스킴을
+        받지 않는다. 배포할 때마다 손으로 고치면 반드시 한 번은 빠뜨리므로
+        여기서 한 번에 흡수한다.
+        """
+        url = self.database_url
+        if url.startswith("postgres://"):
+            url = "postgresql+psycopg://" + url[len("postgres://"):]
+        elif url.startswith("postgresql://"):
+            url = "postgresql+psycopg://" + url[len("postgresql://"):]
+        return url
+
 
 settings = Settings()
 settings.uploads_dir.mkdir(parents=True, exist_ok=True)

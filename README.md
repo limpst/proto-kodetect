@@ -9,28 +9,142 @@
 
 ---
 
-## 1. 빠른 시작
+## 1. 로컬 실행
+
+### 1-1. 준비
+
+Python **3.11 이상** (3.12·3.13·3.14 확인). Node는 필요 없습니다 — 프론트엔드는
+빌드 없는 정적 파일이고 FastAPI가 직접 서빙합니다.
 
 ```bash
-python -m venv .venv
-./.venv/Scripts/python.exe -m pip install -r requirements.txt
+git clone https://github.com/limpst/proto-kodetect.git
+cd proto-kodetect
 
-# 서버 (최초 기동 시 DB 생성 + 시연 데이터 자동 시딩)
-PYTHONPATH=backend ./.venv/Scripts/python.exe -m uvicorn app.main:app --port 8077
+python -m venv .venv
 ```
 
-→ <http://127.0.0.1:8077> · 기본 계정 `admin` / `kodetect` (`.env`로 변경)
+가상환경 활성화 — 셸에 따라 다릅니다.
+
+| 셸 | 명령 |
+|---|---|
+| PowerShell | `.\.venv\Scripts\Activate.ps1` |
+| cmd | `.\.venv\Scripts\activate.bat` |
+| Git Bash / WSL / macOS | `source .venv/bin/activate` (Windows는 `source .venv/Scripts/activate`) |
+
+활성화하지 않고 인터프리터를 직접 지정해도 됩니다 —
+Windows `.\.venv\Scripts\python.exe`, macOS/Linux `./.venv/bin/python`.
+
+```bash
+python -m pip install --upgrade pip
+python -m pip install -r requirements.txt
+```
+
+`requirements.txt` 는 **웹 서비스 구동에 필요한 것만** 담고 있습니다.
+강화학습을 직접 돌리려면 `requirements-dev.txt` (torch 포함)를 쓰십시오.
+
+### 1-2. 설정
+
+```bash
+cp .env.example .env        # Windows: copy .env.example .env
+```
+
+`.env` 를 열어 최소 두 가지를 정합니다.
+
+```env
+AUTH_USER=admin
+AUTH_PASSWORD=원하는-비밀번호
+SESSION_SECRET=            # 비워도 로컬은 동작하지만, 재시작 시 로그인이 풀립니다
+```
+
+`SESSION_SECRET` 을 고정하려면:
+
+```bash
+python -c "import secrets; print(secrets.token_urlsafe(48))"
+```
+
+인증을 끄고 바로 화면을 보려면 `AUTH_ENABLED=0` 으로 두면 됩니다 (개발 전용).
+
+### 1-3. 실행
+
+```bash
+python -m uvicorn app.main:app --app-dir backend --port 8077 --reload
+```
+
+`--app-dir backend` 가 `backend/` 를 import 경로에 넣습니다.
+`--reload` 는 코드 수정 시 자동 재기동합니다(개발용, 배포에서는 빼십시오).
+
+첫 기동에서 **테이블 생성과 시연 데이터 시딩이 자동으로 일어납니다.**
+건축물 3동 · 점검 15회차 · 결함 121건 · 균열 추적 12건 · 계측 채널 27개.
+
+→ <http://127.0.0.1:8077> · `.env` 에 넣은 계정으로 로그인
+
+### 1-4. 화면 둘러보기 순서
+
+1. **개요** — 시설물을 바꿔 보십시오. A동은 D등급, 옹벽은 C등급으로 이력이 다릅니다
+2. **균열 분석** — `합성 표본으로 시연` 을 누르면 사진 없이도 검출 → 판정 → 저장 →
+   종합등급 갱신까지 전 과정이 돕니다
+3. **시계열 진행** — 좌측 균열을 클릭하면 진행 곡선과 허용폭 도달 예측이 바뀝니다
+4. **실시간 계측** — 상단 표시등이 초록이면 WebSocket 연결됨. 지수가 1초마다 갱신됩니다
+5. **3D 뷰** — 드래그로 회전, 휠로 확대. 센서 구체가 실시간 상태에 따라 색·크기가 바뀝니다
+6. **판정서** — 브라우저 인쇄(Ctrl+P)로 PDF 저장
+
+### 1-5. 데이터 초기화
+
+```bash
+rm kodetect.db          # Windows: del kodetect.db
+```
+
+다음 기동에서 시연 데이터가 다시 만들어집니다.
+
+### 1-6. 부가 명령
 
 | 명령 | 용도 |
 |---|---|
-| `python -m datagen.generate --count 20000 --out data/synth_v1 --workers 8` | 합성 드론 균열 데이터셋 대량 생성 |
+| `python -m datagen.generate --count 20000 --out data/synth_v1 --workers 8` | 합성 드론 균열 데이터셋 대량 생성 (8워커 ~17장/초) |
 | `python -m datagen.evaluate --data data/synth_v1` | 검출기 벤치마크 (P/R/F1 · 폭 MAE · 등급 일치율) |
-| `python -m rl.train --episodes 600 --out models/rl_v1` | 유지관리 정책 강화학습 |
-| `docker compose -f n8n/docker-compose.yml up -d` | n8n 백엔드 오케스트레이션 |
+| `python -m rl.train --episodes 600 --out models/rl_v1` | 유지관리 정책 강화학습 (`requirements-dev.txt` 필요) |
+| `docker compose -f n8n/docker-compose.yml up -d` | n8n 백엔드 오케스트레이션 (<http://localhost:5678>) |
+
+### 1-7. 자주 걸리는 문제
+
+| 증상 | 원인 · 조치 |
+|---|---|
+| `ModuleNotFoundError: No module named 'app'` | `--app-dir backend` 누락 |
+| `ModuleNotFoundError: No module named 'rl'` | 저장소 루트에서 실행하십시오. 또는 `PYTHONPATH=backend:.` |
+| 로그인이 계속 풀림 | `SESSION_SECRET` 미설정 — 프로세스마다 키가 새로 생성됨 |
+| 포트 충돌 | `--port 8078` 등으로 변경 |
+| 정책 화면이 "규칙 기반"으로 표시 | 정상. `models/rl_v1/` 이 없으면 규칙 기반으로 대체됩니다 |
 
 ---
 
-## 2. 아키텍처
+## 2. 배포 (Render)
+
+상세는 **[docs/DEPLOY_RENDER.md](docs/DEPLOY_RENDER.md)** 를 보십시오. 요약하면:
+
+**Blueprint (권장)** — 대시보드 → New → Blueprint → 저장소 선택 → Apply.
+저장소의 `render.yaml` 이 웹 서비스와 Postgres를 함께 만듭니다.
+배포 후 `AUTH_PASSWORD` 하나만 입력하면 됩니다.
+
+**수동 생성** — New Web Service 화면에서 Start Command를 반드시 바꾸십시오.
+
+```
+uvicorn app.main:app --host 0.0.0.0 --port $PORT --app-dir backend
+```
+
+자동입력되는 `gunicorn your_application.wsgi` 로는 뜨지 않습니다. 이 앱은
+ASGI(FastAPI)이고 WebSocket을 씁니다. Health Check Path는 `/healthz` 로 두십시오.
+
+필수 환경변수 — `PYTHON_VERSION=3.12.8` · `PYTHONPATH=backend:.` ·
+`SESSION_SECRET`(Generate) · `AUTH_USER` · `AUTH_PASSWORD` ·
+`STORAGE_DIR=/tmp/storage` · `WEB_CONCURRENCY=1`
+
+> **free 플랜 제약** — 15분 무접속 시 정지(콜드스타트 30~60초, WebSocket 재연결
+> 필요) · 영구 디스크 없음(업로드 원본 소실) · 512MB(대형 원본 분석 시 OOM 가능).
+> `Dockerfile` 도 포함되어 있어 온프레미스·Docker 런타임 배포도 가능합니다.
+
+---
+
+## 3. 아키텍처
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -55,7 +169,7 @@ PYTHONPATH=backend ./.venv/Scripts/python.exe -m uvicorn app.main:app --port 807
 
 ---
 
-## 3. 균열 검출 엔진
+## 4. 균열 검출 엔진
 
 `backend/app/services/vision.py`
 
@@ -90,7 +204,7 @@ PYTHONPATH=backend ./.venv/Scripts/python.exe -m uvicorn app.main:app --port 807
 
 ---
 
-## 4. 판정 기준
+## 5. 판정 기준
 
 `backend/app/domain.py` · `backend/app/grading.py` — 기준이 개정되면 이 두 파일만 고칩니다.
 
@@ -103,7 +217,7 @@ PYTHONPATH=backend ./.venv/Scripts/python.exe -m uvicorn app.main:app --port 807
 
 ---
 
-## 5. 시계열 — 균열 진행과 실시간 MTM
+## 6. 시계열 — 균열 진행과 실시간 MTM
 
 `backend/app/services/timeseries.py`
 
@@ -121,7 +235,7 @@ PYTHONPATH=backend ./.venv/Scripts/python.exe -m uvicorn app.main:app --port 807
 
 ---
 
-## 6. 계측 시뮬레이션
+## 7. 계측 시뮬레이션
 
 `backend/app/services/sensors.py` — 실계측기 연결 전까지 대시보드·경보·지수를
 실제와 같은 파형으로 구동합니다. 시드를 고정하면 항상 같은 파형이 나오므로
@@ -138,7 +252,7 @@ PYTHONPATH=backend ./.venv/Scripts/python.exe -m uvicorn app.main:app --port 807
 
 ---
 
-## 7. 강화학습 — 유지관리 정책
+## 8. 강화학습 — 유지관리 정책
 
 `rl/` — 예산 제약 하의 점검·보수 의사결정을 **POMDP**로 모델링합니다.
 부재의 실제 열화 등급은 볼 수 없고, 점검해야만 잡음 섞인 관측을 얻습니다.
@@ -159,7 +273,7 @@ PYTHONPATH=backend ./.venv/Scripts/python.exe -m uvicorn app.main:app --port 807
 
 ---
 
-## 8. 합성 데이터 생성
+## 9. 합성 데이터 생성
 
 `datagen/synth.py` — 실촬영 데이터가 수백 장일 때 수만 장 규모의 사전학습
 세트를 절차적으로 만듭니다. 모든 표본이 픽셀 마스크와 **정답 균열폭(mm)** 을
@@ -176,7 +290,7 @@ PYTHONPATH=backend ./.venv/Scripts/python.exe -m uvicorn app.main:app --port 807
 
 ---
 
-## 9. n8n 백엔드 — 스스로 진화하는 구조
+## 10. n8n 백엔드 — 스스로 진화하는 구조
 
 `n8n/` — 수집·스케줄·카탈로그·자동조사를 **코드가 아니라 워크플로우**로 둡니다.
 
@@ -196,7 +310,7 @@ PYTHONPATH=backend ./.venv/Scripts/python.exe -m uvicorn app.main:app --port 807
 
 ---
 
-## 10. 웹 화면
+## 11. 웹 화면
 
 | 화면 | 내용 |
 |---|---|
@@ -213,7 +327,7 @@ PYTHONPATH=backend ./.venv/Scripts/python.exe -m uvicorn app.main:app --port 807
 
 ---
 
-## 11. 구조
+## 12. 구조
 
 ```
 backend/app/        도메인 · 판정 · 서비스 · API
@@ -228,7 +342,7 @@ n8n/                docker-compose · 워크플로우 정의
 docs/               벤치마크 결과 · 일일 작업 기록
 ```
 
-## 12. 로드맵
+## 13. 로드맵
 
 - [ ] 검출기를 학습 모델(Mask R-CNN + Y-MaskNet)로 교체 — 인터페이스는 준비됨
 - [ ] 균열 게이지 대조 촬영으로 PSF 계수 현장 보정
