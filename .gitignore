@@ -1,0 +1,32 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Node
+node_modules/
+dist/
+.vite/
+
+# Data / runtime
+storage/uploads/*
+storage/overlays/*
+!storage/uploads/.gitkeep
+!storage/overlays/.gitkeep
+*.db
+*.sqlite3
+
+# Env / editor
+.env
+.env.local
+.idea/
+.vscode/
+*.log
+
+# 대용량 산출물
+data/
+models/
+docs/server.log
+docs/rl_train.log

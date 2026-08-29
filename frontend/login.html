@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>KO-Detect · 로그인</title>
+<link rel="stylesheet" href="/static/css/app.css" />
+<style>
+  body {
+    display: grid; place-items: center; min-height: 100vh;
+    background:
+      radial-gradient(900px 560px at 16% -12%, rgba(56,189,248,.10), transparent 62%),
+      radial-gradient(760px 520px at 84% 112%, rgba(47,129,247,.09), transparent 58%),
+      var(--bg);
+  }
+  .wrap { width: min(400px, 92vw); }
+
+  .brandblock { text-align: center; margin-bottom: 26px; }
+  .brandblock .glyph {
+    width: 58px; height: 58px; margin: 0 auto 14px;
+    display: grid; place-items: center; border-radius: 16px;
+    background: linear-gradient(135deg, rgba(56,189,248,.20), rgba(47,129,247,.12));
+    border: 1px solid rgba(56,189,248,.34);
+  }
+  .brandblock .glyph svg { width: 30px; height: 30px; }
+  .brandblock .name {
+    font-size: 27px; font-weight: 800; letter-spacing: -0.03em;
+    background: linear-gradient(135deg, #7dd3fc 0%, #2f81f7 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .brandblock .ko { font-size: 13px; color: var(--text-dim); margin-top: 5px; }
+  .brandblock .ver {
+    display: inline-block; margin-top: 10px; padding: 2px 10px; border-radius: 11px;
+    font-size: 10.5px; font-weight: 700; letter-spacing: .09em;
+    color: var(--accent); border: 1px solid rgba(56,189,248,.32);
+    background: var(--accent-soft);
+  }
+
+  .card.login { padding: 24px 22px 22px; box-shadow: var(--shadow); }
+  .card.login h2 { font-size: 15px; margin: 0 0 18px; font-weight: 650;
+                   letter-spacing: -0.01em; text-transform: none; color: var(--text); }
+  .field { margin-bottom: 14px; }
+  .field input { width: 100%; padding: 11px 12px; font-size: 14px; }
+  button.primary { width: 100%; padding: 12px; font-size: 14px; margin-top: 6px; }
+
+  .msg { display: none; margin-bottom: 14px; padding: 9px 12px;
+         border-radius: var(--radius-sm); font-size: 12px; }
+  .msg.show { display: block; }
+  .msg.err { background: rgba(239,68,68,.09); border: 1px solid rgba(239,68,68,.34); color: #fca5a5; }
+  .msg.ok  { background: rgba(34,197,94,.09);  border: 1px solid rgba(34,197,94,.34);  color: #86efac; }
+
+  .foot { text-align: center; margin-top: 20px; font-size: 11px;
+          color: var(--text-mute); line-height: 1.9; }
+  .foot code { background: var(--panel-2); border: 1px solid var(--line);
+               border-radius: 4px; padding: 1px 6px; color: var(--text-dim);
+               font-family: var(--mono); font-size: 10.5px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <div class="brandblock">
+    <div class="glyph">
+      <!-- 건축물 단면 + 균열 -->
+      <svg viewBox="0 0 32 32" fill="none" stroke="#7dd3fc" stroke-width="1.8"
+           stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M4 28V9l12-6 12 6v19" />
+        <path d="M4 28h24" />
+        <path d="M11 28v-8h10v8" />
+        <path d="M16 3v6" stroke="#38bdf8" />
+        <path d="M20.5 12l-3 4.5 3 2-2.5 4" stroke="#f97316" stroke-width="1.6" />
+      </svg>
+    </div>
+    <div class="name">KO-Detect</div>
+    <div class="ko">건축물 안전진단 통합 플랫폼</div>
+    <div class="ver">v0.1.0</div>
+  </div>
+
+  <form class="card login" id="loginForm" autocomplete="on">
+    <h2>로그인</h2>
+    <div class="msg" id="msg"></div>
+
+    <div class="field">
+      <label for="u">사용자명</label>
+      <input id="u" name="username" type="text" required autocomplete="username"
+             autofocus value="admin" />
+    </div>
+    <div class="field">
+      <label for="p">비밀번호</label>
+      <input id="p" name="password" type="password" required
+             autocomplete="current-password" />
+    </div>
+    <button class="primary" id="btn" type="submit">로그인</button>
+  </form>
+
+  <div class="foot">
+    기본 계정은 <code>AUTH_USER</code> / <code>AUTH_PASSWORD</code> (.env) 로 설정합니다.<br />
+    인증 해제: <code>AUTH_ENABLED=0</code>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const next = new URLSearchParams(location.search).get("next") || "/";
+
+function show(text, ok = false) {
+  const m = $("msg");
+  m.className = "msg show " + (ok ? "ok" : "err");
+  m.textContent = text;
+}
+
+$("loginForm").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const btn = $("btn");
+  btn.disabled = true;
+  btn.textContent = "확인 중…";
+  try {
+    const r = await fetch("/api/auth/login", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ username: $("u").value, password: $("p").value }),
+      credentials: "same-origin",
+    });
+    if (r.ok) {
+      show("인증 성공 — 이동합니다", true);
+      setTimeout(() => { location.href = next; }, 350);
+      return;
+    }
+    const body = await r.json().catch(() => ({}));
+    if (r.status === 429) {
+      show(`차단됨 — ${r.headers.get("Retry-After") || "?"}초 후 재시도 (${body.detail || ""})`);
+    } else {
+      show(body.detail || `로그인 실패 (HTTP ${r.status})`);
+    }
+  } catch (err) {
+    show("네트워크 오류: " + err.message);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "로그인";
+  }
+});
+
+// 이미 인증되어 있으면 바로 통과시킨다
+fetch("/api/auth/me", { credentials: "same-origin" })
+  .then((r) => r.json())
+  .then((d) => { if (d.authenticated || !d.auth_enabled) location.href = next; })
+  .catch(() => {});
+</script>
+</body>
+</html>

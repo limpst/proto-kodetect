@@ -1,0 +1,161 @@
+{
+  "name": "KO-Detect · 01 데이터 수집 (드론 영상 · 계측)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [{ "field": "minutes", "minutesInterval": 15 }]
+        }
+      },
+      "id": "trg-schedule",
+      "name": "15분 주기",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-420, 200]
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "kodetect/ingest",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "id": "trg-webhook",
+      "name": "수동 업로드 웹훅",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [-420, 400]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.KODETECT_API }}/api/auth/login",
+        "method": "POST",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\"username\": \"{{ $env.KODETECT_USER }}\", \"password\": \"{{ $env.KODETECT_PASSWORD }}\"}",
+        "options": { "response": { "response": { "fullResponse": true } } }
+      },
+      "id": "auth",
+      "name": "세션 획득",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [-180, 300]
+    },
+    {
+      "parameters": {
+        "fileSelector": "/data/inbox/**/*.jpg",
+        "options": {}
+      },
+      "id": "scan",
+      "name": "수집함 스캔",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [60, 200]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 파일명 규약에서 촬영 메타를 파싱한다.\n//   <시설물ID>_<부재코드>_<촬영거리m>_<YYYYMMDD-HHMM>.jpg\n//   예) 1_column_8.0_20260830-0930.jpg\n// 규약을 못 지킨 파일은 격리 큐로 보낸다 — 스케일을 모르면\n// 균열폭을 mm로 환산할 수 없어 판정 자체가 성립하지 않는다.\nconst out = [];\nfor (const item of $input.all()) {\n  const name = item.json.fileName || item.binary?.data?.fileName || '';\n  const m = name.match(/^(\\d+)_([a-z_]+)_([\\d.]+)_(\\d{8})-(\\d{4})\\.(jpg|jpeg|png)$/i);\n  if (!m) {\n    out.push({ json: { _quarantine: true, fileName: name, reason: '파일명 규약 불일치' } });\n    continue;\n  }\n  out.push({\n    json: {\n      building_id: Number(m[1]),\n      member_code: m[2],\n      distance_m: Number(m[3]),\n      captured_at: `${m[4].slice(0,4)}-${m[4].slice(4,6)}-${m[4].slice(6,8)}T${m[5].slice(0,2)}:${m[5].slice(2,4)}:00`,\n      fileName: name,\n    },\n    binary: item.binary,\n  });\n}\nreturn out;"
+      },
+      "id": "parse",
+      "name": "촬영 메타 파싱",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [300, 200]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "version": 2 },
+          "conditions": [
+            {
+              "leftValue": "={{ $json._quarantine }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "notEquals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "gate",
+      "name": "메타 유효성 게이트",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.2,
+      "position": [540, 200]
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.KODETECT_API }}/api/detect",
+        "method": "POST",
+        "contentType": "multipart-form-data",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "parameterType": "formBinaryData", "name": "file", "inputDataFieldName": "data" },
+            { "name": "inspection_id", "value": "={{ $json.inspection_id }}" },
+            { "name": "member_code", "value": "={{ $json.member_code }}" },
+            { "name": "distance_m", "value": "={{ $json.distance_m }}" },
+            { "name": "source", "value": "drone" }
+          ]
+        },
+        "options": {}
+      },
+      "id": "detect",
+      "name": "균열 검출 · 등급 판정",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [800, 120]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 선명도 게이트에 걸린 사진은 재촬영 목록으로 넘긴다.\n// 흐린 영상은 균열폭이 과대평가되므로 그대로 판정에 쓰면 안 된다.\nconst pass = [], retake = [];\nfor (const i of $input.all()) {\n  (i.json.quality_ok ? pass : retake).push(i);\n}\nreturn [...pass, ...retake.map(r => ({ json: { ...r.json, _retake: true } }))];"
+      },
+      "id": "quality",
+      "name": "촬영 품질 분류",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1040, 120]
+    },
+    {
+      "parameters": {
+        "operation": "write",
+        "fileName": "=/data/catalog/detections/{{ $now.format('yyyyMMdd') }}.jsonl",
+        "options": { "append": true }
+      },
+      "id": "catalog",
+      "name": "카탈로그 적재",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [1280, 120]
+    },
+    {
+      "parameters": {
+        "operation": "write",
+        "fileName": "=/data/quarantine/{{ $now.format('yyyyMMdd') }}.jsonl",
+        "options": { "append": true }
+      },
+      "id": "quarantine",
+      "name": "격리 큐",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [800, 340]
+    }
+  ],
+  "connections": {
+    "15분 주기": { "main": [[{ "node": "세션 획득", "type": "main", "index": 0 }]] },
+    "수동 업로드 웹훅": { "main": [[{ "node": "세션 획득", "type": "main", "index": 0 }]] },
+    "세션 획득": { "main": [[{ "node": "수집함 스캔", "type": "main", "index": 0 }]] },
+    "수집함 스캔": { "main": [[{ "node": "촬영 메타 파싱", "type": "main", "index": 0 }]] },
+    "촬영 메타 파싱": { "main": [[{ "node": "메타 유효성 게이트", "type": "main", "index": 0 }]] },
+    "메타 유효성 게이트": {
+      "main": [
+        [{ "node": "균열 검출 · 등급 판정", "type": "main", "index": 0 }],
+        [{ "node": "격리 큐", "type": "main", "index": 0 }]
+      ]
+    },
+    "균열 검출 · 등급 판정": { "main": [[{ "node": "촬영 품질 분류", "type": "main", "index": 0 }]] },
+    "촬영 품질 분류": { "main": [[{ "node": "카탈로그 적재", "type": "main", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1", "timezone": "Asia/Seoul" },
+  "tags": [{ "name": "kodetect" }, { "name": "ingest" }]
+}

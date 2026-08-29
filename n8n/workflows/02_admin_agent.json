@@ -1,0 +1,135 @@
+{
+  "name": "KO-Detect · 02 관리자 대화 에이전트 (자기진화 백엔드)",
+  "nodes": [
+    {
+      "parameters": { "options": {} },
+      "id": "chat",
+      "name": "관리자 채팅",
+      "type": "@n8n/n8n-nodes-langchain.chatTrigger",
+      "typeVersion": 1.1,
+      "position": [-460, 260],
+      "webhookId": "kodetect-admin-chat"
+    },
+    {
+      "parameters": {
+        "options": {
+          "systemMessage": "당신은 KO-Detect 건축물 안전진단 플랫폼의 백엔드 운영 에이전트입니다.\n\n역할\n- 관리자의 자연어 지시를 받아 데이터 수집·스케줄·카탈로그 워크플로우를 조회하고 수정합니다.\n- 코드를 직접 쓰는 대신 n8n 워크플로우를 만들거나 고치고, KO-Detect API를 호출합니다.\n\n반드시 지킬 것\n1. 판정 기준(허용균열폭, 상태등급 경계)은 법령·설계기준에 근거합니다. 임의로 완화하지 마십시오.\n2. 워크플로우를 수정하기 전에 무엇을 왜 바꾸는지 한 문장으로 밝히고 승인받으십시오.\n3. 되돌릴 수 없는 작업(워크플로우 삭제, 데이터 삭제, 판정서 발행)은 반드시 확인을 받으십시오.\n4. AI 판정은 보조 참고자료입니다. 책임기술자 검토가 필요하다는 점을 결과에 항상 덧붙이십시오.\n\n답변은 한국어로, 수치를 앞세워 간결하게 합니다."
+        }
+      },
+      "id": "agent",
+      "name": "운영 에이전트",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [-160, 260]
+    },
+    {
+      "parameters": { "options": { "temperature": 0.2 } },
+      "id": "llm",
+      "name": "Anthropic Claude",
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.2,
+      "position": [-300, 500]
+    },
+    {
+      "parameters": { "contextWindowLength": 20 },
+      "id": "memory",
+      "name": "대화 메모리",
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.3,
+      "position": [-140, 500]
+    },
+    {
+      "parameters": {
+        "toolDescription": "시설물 목록과 최근 안전등급을 조회한다.",
+        "url": "={{ $env.KODETECT_API }}/api/buildings",
+        "options": {}
+      },
+      "id": "tool-buildings",
+      "name": "도구: 시설물 조회",
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.2,
+      "position": [20, 500]
+    },
+    {
+      "parameters": {
+        "toolDescription": "특정 시설물의 균열 진행 시계열과 허용폭 도달 예측을 조회한다. building_id 필요.",
+        "url": "={{ $env.KODETECT_API }}/api/buildings/{building_id}/progression",
+        "placeholderDefinitions": {
+          "values": [{ "name": "building_id", "description": "시설물 ID", "type": "number" }]
+        },
+        "options": {}
+      },
+      "id": "tool-progression",
+      "name": "도구: 균열 진행 분석",
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.2,
+      "position": [180, 500]
+    },
+    {
+      "parameters": {
+        "toolDescription": "강화학습 유지관리 정책의 부재별 권장 조치를 조회한다. building_id 필요.",
+        "url": "={{ $env.KODETECT_API }}/api/policy/recommend/{building_id}",
+        "placeholderDefinitions": {
+          "values": [{ "name": "building_id", "description": "시설물 ID", "type": "number" }]
+        },
+        "options": {}
+      },
+      "id": "tool-policy",
+      "name": "도구: 유지관리 정책",
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.2,
+      "position": [340, 500]
+    },
+    {
+      "parameters": {
+        "toolDescription": "n8n 자신의 워크플로우를 조회·생성·수정한다. 백엔드가 스스로 구조를 바꾸는 경로이므로 신중히 쓸 것.",
+        "url": "http://localhost:5678/api/v1/workflows",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [{ "name": "X-N8N-API-KEY", "value": "={{ $env.N8N_API_KEY }}" }]
+        },
+        "options": {}
+      },
+      "id": "tool-selfedit",
+      "name": "도구: 워크플로우 자기수정",
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.2,
+      "position": [500, 500]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 에이전트가 내린 결정과 근거를 감사 로그로 남긴다.\n// 자기진화하는 백엔드에서 '무엇이 언제 왜 바뀌었는가'는 반드시 추적 가능해야 한다.\nreturn $input.all().map(i => ({\n  json: {\n    ts: new Date().toISOString(),\n    actor: 'admin-agent',\n    output: i.json.output,\n    tools_used: i.json.intermediateSteps?.map(s => s.action?.tool) ?? [],\n  },\n}));"
+      },
+      "id": "audit",
+      "name": "감사 로그",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [140, 260]
+    },
+    {
+      "parameters": {
+        "operation": "write",
+        "fileName": "=/data/catalog/agent_audit/{{ $now.format('yyyyMM') }}.jsonl",
+        "options": { "append": true }
+      },
+      "id": "audit-write",
+      "name": "감사 로그 적재",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [400, 260]
+    }
+  ],
+  "connections": {
+    "관리자 채팅": { "main": [[{ "node": "운영 에이전트", "type": "main", "index": 0 }]] },
+    "운영 에이전트": { "main": [[{ "node": "감사 로그", "type": "main", "index": 0 }]] },
+    "감사 로그": { "main": [[{ "node": "감사 로그 적재", "type": "main", "index": 0 }]] },
+    "Anthropic Claude": { "ai_languageModel": [[{ "node": "운영 에이전트", "type": "ai_languageModel", "index": 0 }]] },
+    "대화 메모리": { "ai_memory": [[{ "node": "운영 에이전트", "type": "ai_memory", "index": 0 }]] },
+    "도구: 시설물 조회": { "ai_tool": [[{ "node": "운영 에이전트", "type": "ai_tool", "index": 0 }]] },
+    "도구: 균열 진행 분석": { "ai_tool": [[{ "node": "운영 에이전트", "type": "ai_tool", "index": 0 }]] },
+    "도구: 유지관리 정책": { "ai_tool": [[{ "node": "운영 에이전트", "type": "ai_tool", "index": 0 }]] },
+    "도구: 워크플로우 자기수정": { "ai_tool": [[{ "node": "운영 에이전트", "type": "ai_tool", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1", "timezone": "Asia/Seoul" },
+  "tags": [{ "name": "kodetect" }, { "name": "agent" }]
+}

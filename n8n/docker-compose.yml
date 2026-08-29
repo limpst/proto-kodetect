@@ -1,0 +1,66 @@
+# KO-Detect 백엔드 오케스트레이션 — n8n 스택
+#
+# 백엔드의 "배관"(수집 · 스케줄 · 카탈로그 · 자동조사)은 코드가 아니라 n8n
+# 워크플로우로 둔다. 관리자가 대화형으로 워크플로우를 고쳐 나갈 수 있어야
+# 하기 때문이다. Python 서비스(KO-Detect API)는 도메인 판정과 영상 추론만
+# 담당하는 "계산 커널"로 남는다.
+#
+#   docker compose up -d
+#   http://localhost:5678
+
+services:
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:latest
+    container_name: kodetect-n8n
+    restart: unless-stopped
+    ports:
+      - "5678:5678"
+    environment:
+      - N8N_HOST=${N8N_HOST:-localhost}
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - WEBHOOK_URL=${WEBHOOK_URL:-http://localhost:5678/}
+      - GENERIC_TIMEZONE=Asia/Seoul
+      - TZ=Asia/Seoul
+      # 커뮤니티 MCP 노드를 AI Agent의 도구로 쓰기 위한 필수 설정
+      - N8N_COMMUNITY_PACKAGES_ALLOW_TOOL_USAGE=true
+      - N8N_RUNNERS_ENABLED=true
+      # KO-Detect 계산 커널 주소 — 워크플로우가 이 API를 호출한다
+      - KODETECT_API=${KODETECT_API:-http://host.docker.internal:8077}
+      - KODETECT_USER=${KODETECT_USER:-admin}
+      - KODETECT_PASSWORD=${KODETECT_PASSWORD:-kodetect}
+      - DB_TYPE=sqlite
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - ./workflows:/workflows:ro
+      - ../data:/data
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # 자동조사·자율학습에 쓰는 로컬 LLM (선택).
+  # 폐쇄망 요구가 있는 공공 현장에서는 외부 API 대신 이쪽을 쓴다.
+  ollama:
+    image: ollama/ollama:latest
+    container_name: kodetect-ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    profiles: ["llm"]
+
+  # 카탈로그·벡터 검색 저장소 (선택)
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: kodetect-qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    profiles: ["search"]
+
+volumes:
+  n8n_data:
+  ollama_data:
+  qdrant_data:

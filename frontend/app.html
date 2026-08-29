@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>KO-Detect · 건축물 안전진단 통합 플랫폼</title>
+<link rel="stylesheet" href="/static/css/app.css" />
+<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js"></script>
+</head>
+<body>
+<div class="shell">
+
+  <!-- ─── 사이드바 ─────────────────────────────────────── -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="mark">KO-Detect</div>
+      <div class="sub">건축물 안전진단 통합 플랫폼</div>
+    </div>
+
+    <nav class="nav" id="nav">
+      <div class="group">진단</div>
+      <a href="#overview"    data-view="overview"><span class="ico">▤</span> 개요</a>
+      <a href="#detect"      data-view="detect"><span class="ico">◈</span> 균열 분석</a>
+      <a href="#progression" data-view="progression"><span class="ico">◔</span> 시계열 진행</a>
+
+      <div class="group">모니터링</div>
+      <a href="#live"  data-view="live"><span class="ico">◉</span> 실시간 계측</a>
+      <a href="#view3d" data-view="view3d"><span class="ico">⬢</span> 3D 뷰</a>
+
+      <div class="group">의사결정</div>
+      <a href="#policy"  data-view="policy"><span class="ico">◆</span> 유지관리 정책</a>
+      <a href="#report"  data-view="report"><span class="ico">▦</span> 판정서</a>
+    </nav>
+
+    <div class="foot">
+      <div id="userLine">—</div>
+      <div style="margin-top:8px"><a href="#" id="logout" style="color:var(--text-dim)">로그아웃</a></div>
+    </div>
+  </aside>
+
+  <!-- ─── 메인 ─────────────────────────────────────────── -->
+  <div class="main">
+    <header class="topbar">
+      <h1 id="viewTitle">개요</h1>
+      <select id="buildingSel" title="대상 시설물"></select>
+      <div class="spacer"></div>
+      <div class="chip" style="min-width:132px">
+        <div class="c-l">건전성 지수 (MTM)</div>
+        <div class="c-v num" id="tickHealth">—<small id="tickDelta"></small></div>
+      </div>
+      <span class="grade g-none" id="tickGrade">—</span>
+      <div class="live-dot" id="liveDot"><i></i><span>연결 대기</span></div>
+    </header>
+
+    <div class="content">
+
+      <!-- ── 개요 ── -->
+      <section class="view active" id="view-overview">
+        <div class="row">
+          <div class="card">
+            <h2>시설물 현황 <span class="hint" id="ovMeta"></span></h2>
+            <div class="kpi-grid" id="ovKpis"></div>
+          </div>
+        </div>
+        <div class="row wide-left">
+          <div class="card">
+            <h2>건전성 지수 추이 <span class="hint">점검 회차별 · 100에 가까울수록 양호</span></h2>
+            <div class="chart" id="ovHistoryChart"></div>
+          </div>
+          <div class="card">
+            <h2>종합 판정</h2>
+            <div id="ovVerdict"></div>
+          </div>
+        </div>
+        <div class="row wide-right">
+          <div class="card">
+            <h2>부재별 상태등급 <span class="hint">최근 점검</span></h2>
+            <div class="table-wrap"><table id="ovMembers"></table></div>
+          </div>
+          <div class="card">
+            <h2>점검 이력</h2>
+            <div class="table-wrap table-scroll"><table id="ovInspections"></table></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── 균열 분석 ── -->
+      <section class="view" id="view-detect">
+        <div class="row">
+          <div class="card">
+            <h2>영상 분석 <span class="hint">드론/현장 사진 업로드 또는 합성 표본으로 즉시 시연</span></h2>
+            <div class="field-row">
+              <div class="field">
+                <label for="dtInsp">점검 회차</label>
+                <select id="dtInsp"></select>
+              </div>
+              <div class="field">
+                <label for="dtMember">부재</label>
+                <select id="dtMember"></select>
+              </div>
+              <div class="field">
+                <label for="dtDist">촬영거리 (m)</label>
+                <input id="dtDist" type="number" step="0.1" placeholder="예: 8.0" />
+              </div>
+              <div class="field">
+                <label for="dtGsd">GSD 직접입력 (mm/px)</label>
+                <input id="dtGsd" type="number" step="0.001" placeholder="비우면 거리로 산정" />
+              </div>
+              <div class="field">
+                <label for="dtFile">사진</label>
+                <input id="dtFile" type="file" accept="image/*" />
+              </div>
+              <button class="primary" id="dtRun">분석 실행</button>
+              <button id="dtDemo">합성 표본으로 시연</button>
+            </div>
+            <div id="dtStatus"></div>
+          </div>
+        </div>
+        <div class="row wide-left">
+          <div class="card">
+            <h2>검출 결과 <span class="hint" id="dtHint"></span></h2>
+            <div id="dtImageWrap" class="empty">분석을 실행하면 결과 영상이 표시됩니다</div>
+          </div>
+          <div class="card">
+            <h2>측정 요약</h2>
+            <div class="chips" id="dtChips"></div>
+            <div style="margin-top:14px" class="table-wrap table-scroll">
+              <table id="dtCracks"></table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── 시계열 진행 ── -->
+      <section class="view" id="view-progression">
+        <div class="row wide-left">
+          <div class="card">
+            <h2>균열 진행 곡선 <span class="hint">점검 회차별 실측 + 예측</span></h2>
+            <div class="chart tall" id="prChart"></div>
+            <div class="legend">
+              <span><i style="background:#38bdf8"></i>실측 균열폭</span>
+              <span><i style="background:#a78bfa"></i>예측</span>
+              <span><i style="background:#ef4444"></i>허용균열폭 (KDS 14 20 30)</span>
+            </div>
+          </div>
+          <div class="card">
+            <h2>추적 균열</h2>
+            <div id="prList"></div>
+          </div>
+        </div>
+        <div class="row">
+          <div class="card">
+            <h2>진행 분석 요약 <span class="hint">허용폭 도달까지 남은 기간이 짧은 순</span></h2>
+            <div class="table-wrap"><table id="prTable"></table></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── 실시간 계측 ── -->
+      <section class="view" id="view-live">
+        <div class="row">
+          <div class="card">
+            <h2>실시간 계측 현황 <span class="hint" id="lvMeta">1초 주기 갱신</span></h2>
+            <div class="chips" id="lvChips"></div>
+          </div>
+        </div>
+        <div class="row wide-left">
+          <div class="card">
+            <h2>건전성 지수 라이브 (MTM) <span class="hint">5분 캔들 · 구간 진폭이 구조 응답의 변동성</span></h2>
+            <div class="chart tall" id="lvHealthChart"></div>
+          </div>
+          <div class="card">
+            <h2>경보</h2>
+            <div id="lvAlerts"><div class="empty">경보 없음</div></div>
+            <h2 style="margin-top:18px">지수 기여도</h2>
+            <div id="lvContrib"></div>
+          </div>
+        </div>
+        <div class="row c2">
+          <div class="card">
+            <h2>채널 시계열 <span class="hint" id="lvChTitle"></span></h2>
+            <div class="field-row">
+              <div class="field">
+                <label for="lvChSel">채널</label>
+                <select id="lvChSel"></select>
+              </div>
+            </div>
+            <div class="chart" id="lvChannelChart"></div>
+          </div>
+          <div class="card">
+            <h2>채널 목록</h2>
+            <div class="table-wrap table-scroll"><table id="lvTable"></table></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── 3D 뷰 ── -->
+      <section class="view" id="view3d-section">
+        <div class="row wide-left">
+          <div class="card">
+            <h2>구조물 3D 뷰 <span class="hint">센서 위치와 실시간 상태를 구조물 위에 매핑 · 드래그로 회전</span></h2>
+            <div class="viewport" id="v3dCanvas"></div>
+          </div>
+          <div class="card">
+            <h2>범례</h2>
+            <div class="chips">
+              <div class="chip"><div class="c-l">정상</div><div class="c-v" style="color:#22c55e">●</div></div>
+              <div class="chip"><div class="c-l">주의</div><div class="c-v" style="color:#eab308">●</div></div>
+              <div class="chip"><div class="c-l">위험</div><div class="c-v" style="color:#ef4444">●</div></div>
+            </div>
+            <div class="note" style="margin-top:14px">
+              구체는 계측 채널입니다. 색은 임계값 대비 현재 상태이며, 크기는 스트레스에
+              비례해 커집니다. 층별 색상은 해당 층 부재의 상태등급을 나타냅니다.
+            </div>
+            <h2 style="margin-top:18px">센서 상태</h2>
+            <div class="table-wrap table-scroll"><table id="v3dTable"></table></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── 유지관리 정책 ── -->
+      <section class="view" id="view-policy">
+        <div class="row">
+          <div class="card">
+            <h2>권장 조치 <span class="hint" id="plSource"></span></h2>
+            <div class="table-wrap"><table id="plActions"></table></div>
+          </div>
+        </div>
+        <div class="row wide-left">
+          <div class="card">
+            <h2>정책 비교 <span class="hint">30년 · 40회 시뮬레이션 평균</span></h2>
+            <div class="table-wrap"><table id="plCompare"></table></div>
+            <div class="note" style="margin-top:12px" id="plNote"></div>
+          </div>
+          <div class="card">
+            <h2>학습 곡선</h2>
+            <div class="chart" id="plCurve"></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── 판정서 ── -->
+      <section class="view" id="view-report">
+        <div class="row">
+          <div class="card">
+            <h2>판정서 생성 <span class="hint">브라우저 인쇄로 PDF 저장</span></h2>
+            <div class="field-row">
+              <div class="field">
+                <label for="rpInsp">점검 회차</label>
+                <select id="rpInsp"></select>
+              </div>
+              <button class="primary" id="rpOpen">판정서 열기</button>
+            </div>
+            <div class="note">
+              AI 분석 결과는 보조 참고자료입니다. 법적 효력이 있는 안전진단 결과로
+              사용하려면 책임기술자(구조기술사 등)의 현장 확인과 서명이 필요합니다.
+            </div>
+          </div>
+        </div>
+        <div class="row">
+          <div class="card">
+            <h2>미리보기</h2>
+            <iframe id="rpFrame" style="width:100%;height:760px;border:1px solid var(--line);
+                    border-radius:var(--radius-sm);background:#fff"></iframe>
+          </div>
+        </div>
+      </section>
+
+    </div>
+  </div>
+</div>
+
+<script src="/static/js/core.js"></script>
+<script src="/static/js/charts.js"></script>
+<script src="/static/js/view3d.js"></script>
+<script src="/static/js/views.js"></script>
+</body>
+</html>

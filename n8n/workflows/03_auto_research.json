@@ -1,0 +1,141 @@
+{
+  "name": "KO-Detect · 03 자동조사 · 자율학습 · 카탈로그",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": { "interval": [{ "field": "cronExpression", "expression": "0 6 * * 1" }] }
+      },
+      "id": "trg",
+      "name": "매주 월 06:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [-460, 260]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 지난 주 수집분에서 '모델이 약한 지점'을 스스로 찾아 조사 주제를 만든다.\n// 자율학습의 출발점은 무엇을 모르는지 아는 것이다.\n//  - 선명도 게이트 탈락률이 높은 부재\n//  - 검출 신뢰도가 낮은 결함 유형\n//  - 허용폭 도달 예측이 1년 이내인 균열\nconst topics = [];\nfor (const i of $input.all()) {\n  const d = i.json;\n  if ((d.retake_rate ?? 0) > 0.2)\n    topics.push({ topic: `${d.member_code} 부재 촬영 품질 저하 원인과 개선 촬영기법`, priority: 1 });\n  if ((d.mean_confidence ?? 1) < 0.6)\n    topics.push({ topic: `${d.defect_type} 검출 신뢰도 개선 — 최신 세그멘테이션 기법`, priority: 1 });\n  if ((d.years_to_allowable ?? 99) <= 1)\n    topics.push({ topic: `${d.member_code} 균열 급진행 시 보수공법 선정 기준`, priority: 0 });\n}\nreturn (topics.length ? topics : [{ topic: '콘크리트 균열폭 자동측정 정확도 향상 최신 연구', priority: 2 }])\n  .sort((a, b) => a.priority - b.priority)\n  .map(t => ({ json: t }));"
+      },
+      "id": "gaps",
+      "name": "약점 탐지 → 조사 주제 생성",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [-200, 260]
+    },
+    {
+      "parameters": {
+        "options": {
+          "systemMessage": "당신은 건축물 안전진단 도메인의 리서치 에이전트입니다.\n\n주어진 주제에 대해 근거 있는 조사 결과를 만듭니다.\n- 반드시 출처를 남기고, 확인되지 않은 내용은 '미확인'으로 표시합니다.\n- 국내 기준(시설물안전법, KDS/KCS)과 상충하는 해외 기법은 상충 지점을 명시합니다.\n- 결론은 'KO-Detect에 적용 가능한가 / 무엇을 바꿔야 하는가'로 끝맺습니다.\n\n출력은 JSON: {topic, findings[], sources[], applicable(boolean), proposed_change}"
+        }
+      },
+      "id": "research",
+      "name": "조사 에이전트",
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [60, 260]
+    },
+    {
+      "parameters": { "options": { "temperature": 0.3 } },
+      "id": "llm",
+      "name": "Anthropic Claude",
+      "type": "@n8n/n8n-nodes-langchain.lmChatAnthropic",
+      "typeVersion": 1.2,
+      "position": [-60, 500]
+    },
+    {
+      "parameters": { "options": {} },
+      "id": "tool-search",
+      "name": "도구: 웹 검색",
+      "type": "@n8n/n8n-nodes-langchain.toolSerpApi",
+      "typeVersion": 1,
+      "position": [100, 500]
+    },
+    {
+      "parameters": {
+        "toolDescription": "사내 문서·기준서 벡터 검색 (Qdrant). 조사 전에 이미 사내에 답이 있는지 먼저 확인한다.",
+        "url": "http://qdrant:6333/collections/kodetect_docs/points/search",
+        "method": "POST",
+        "sendBody": true,
+        "options": {}
+      },
+      "id": "tool-rag",
+      "name": "도구: 사내 지식 검색",
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.2,
+      "position": [260, 500]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "version": 2 },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.applicable }}",
+              "rightValue": true,
+              "operator": { "type": "boolean", "operation": "equals" }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "gate",
+      "name": "적용 가능성 판단",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.2,
+      "position": [320, 260]
+    },
+    {
+      "parameters": {
+        "jsCode": "// 적용 가능하다고 판단해도 자동 반영하지 않는다.\n// 판정 기준을 건드리는 변경은 사람이 승인해야 한다 — 안전이 걸린 시스템의 원칙.\nreturn $input.all().map(i => ({\n  json: {\n    ...i.json,\n    status: 'pending_review',\n    requires_human_approval: true,\n    created_at: new Date().toISOString(),\n  },\n}));"
+      },
+      "id": "propose",
+      "name": "변경 제안 등록 (사람 승인 대기)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [560, 200]
+    },
+    {
+      "parameters": {
+        "operation": "write",
+        "fileName": "=/data/catalog/research/{{ $now.format('yyyyMMdd') }}.jsonl",
+        "options": { "append": true }
+      },
+      "id": "catalog",
+      "name": "조사 카탈로그 적재",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [800, 260]
+    },
+    {
+      "parameters": {
+        "resource": "databasePage",
+        "operation": "create",
+        "title": "={{ $json.topic }}",
+        "options": {}
+      },
+      "id": "notion",
+      "name": "Notion 리서치 노트 발행",
+      "type": "n8n-nodes-base.notion",
+      "typeVersion": 2.2,
+      "position": [1040, 260]
+    }
+  ],
+  "connections": {
+    "매주 월 06:00": { "main": [[{ "node": "약점 탐지 → 조사 주제 생성", "type": "main", "index": 0 }]] },
+    "약점 탐지 → 조사 주제 생성": { "main": [[{ "node": "조사 에이전트", "type": "main", "index": 0 }]] },
+    "조사 에이전트": { "main": [[{ "node": "적용 가능성 판단", "type": "main", "index": 0 }]] },
+    "적용 가능성 판단": {
+      "main": [
+        [{ "node": "변경 제안 등록 (사람 승인 대기)", "type": "main", "index": 0 }],
+        [{ "node": "조사 카탈로그 적재", "type": "main", "index": 0 }]
+      ]
+    },
+    "변경 제안 등록 (사람 승인 대기)": { "main": [[{ "node": "조사 카탈로그 적재", "type": "main", "index": 0 }]] },
+    "조사 카탈로그 적재": { "main": [[{ "node": "Notion 리서치 노트 발행", "type": "main", "index": 0 }]] },
+    "Anthropic Claude": { "ai_languageModel": [[{ "node": "조사 에이전트", "type": "ai_languageModel", "index": 0 }]] },
+    "도구: 웹 검색": { "ai_tool": [[{ "node": "조사 에이전트", "type": "ai_tool", "index": 0 }]] },
+    "도구: 사내 지식 검색": { "ai_tool": [[{ "node": "조사 에이전트", "type": "ai_tool", "index": 0 }]] }
+  },
+  "settings": { "executionOrder": "v1", "timezone": "Asia/Seoul" },
+  "tags": [{ "name": "kodetect" }, { "name": "research" }]
+}

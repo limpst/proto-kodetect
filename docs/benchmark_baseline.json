@@ -1,0 +1,55 @@
+{
+  "samples": 40,
+  "detection": {
+    "tp": 45,
+    "fp": 56,
+    "fn": 36,
+    "precision": 0.4455,
+    "recall": 0.5556,
+    "f1": 0.4945,
+    "match_threshold": 0.3,
+    "fp_on_other_defect": 11,
+    "precision_excl_other": 0.5
+  },
+  "recall_by_width": {
+    "0.1-0.2mm": {
+      "gt": 2,
+      "hit": 1,
+      "recall": 0.5
+    },
+    "0.2-0.3mm": {
+      "gt": 2,
+      "hit": 1,
+      "recall": 0.5
+    },
+    "0.3-1mm": {
+      "gt": 32,
+      "hit": 21,
+      "recall": 0.656
+    },
+    ">=1.0mm": {
+      "gt": 45,
+      "hit": 22,
+      "recall": 0.489
+    }
+  },
+  "width_mm": {
+    "mae": 0.5065,
+    "median_ae": 0.293,
+    "p90_ae": 1.441,
+    "bias": -0.122,
+    "n": 45
+  },
+  "grade": {
+    "accuracy": 0.8,
+    "confusion": {
+      "b->b": 1,
+      "c->c": 1,
+      "d->d": 16,
+      "d->e": 5,
+      "e->c": 3,
+      "e->d": 1,
+      "e->e": 18
+    }
+  }
+}
