@@ -14,6 +14,7 @@ from .config import settings
 from .db import init_db
 from .routers import auth as auth_router
 from .routers import bhc as bhc_router
+from .routers import batch as batch_router
 from .routers import buildings as buildings_router
 from .routers import detect as detect_router
 from .routers import live as live_router
@@ -58,6 +59,7 @@ async def auth_gate(request: Request, call_next):
 
 app.include_router(auth_router.router)
 app.include_router(bhc_router.router)
+app.include_router(batch_router.router)
 app.include_router(buildings_router.router)
 app.include_router(detect_router.router)
 app.include_router(live_router.router)
