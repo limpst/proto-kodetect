@@ -134,13 +134,17 @@ def export_onnx(model, out: Path, size: int) -> Path:
     model.eval().cpu()
     path = out / "segmenter.onnx"
     dummy = torch.zeros(1, 3, size, size)
-    torch.onnx.export(
-        model, dummy, str(path),
+    kw = dict(
         input_names=["image"], output_names=["logits"],
         dynamic_axes={"image": {0: "n", 2: "h", 3: "w"},
                       "logits": {0: "n", 2: "h", 3: "w"}},
         opset_version=17,
     )
+    try:
+        # torch 2.6+ 의 새 익스포터는 onnxscript 를 요구한다. 없으면 구 경로로 간다.
+        torch.onnx.export(model, dummy, str(path), dynamo=False, **kw)
+    except TypeError:
+        torch.onnx.export(model, dummy, str(path), **kw)
     return path
 
 

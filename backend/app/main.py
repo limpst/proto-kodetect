@@ -23,6 +23,7 @@ from .routers import policy as policy_router
 from .routers import projects as projects_router
 from .routers import reports as reports_router
 from .routers import stitch as stitch_router
+from .routers import tracks as tracks_router
 from .routers import workspace as workspace_router
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -69,6 +70,7 @@ app.include_router(policy_router.router)
 app.include_router(projects_router.router)
 app.include_router(reports_router.router)
 app.include_router(stitch_router.router)
+app.include_router(tracks_router.router)
 app.include_router(workspace_router.router)
 
 app.mount("/static", StaticFiles(directory=FRONTEND / "static"), name="static")

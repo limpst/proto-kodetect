@@ -412,6 +412,9 @@ async function scStats() {
 }
 
 /* ─── CAPA ──────────────────────────────────────────────── */
+/* #bhc 의 칸반이 '지금 어느 단계에 몇 건 있는가'를 보여준다면, 이 화면은
+ * '무엇부터 손대야 하는가'를 한 줄로 세운다. 같은 데이터라도 착수 순서를
+ * 정하는 일과 진행 상황을 훑는 일은 다른 화면이 필요하다. */
 async function scCapa() {
   const node = scSection("capa");
   let capa;
@@ -419,35 +422,83 @@ async function scCapa() {
     capa = await api(`/api/bhc/${App.buildingId}/capa`);
   } catch (e) {
     node.innerHTML = `<div class="row">${scCard("CAPA 조치", "",
-      `<div class="alert">${esc(e.message)}</div>`)}</div>`;
+      `<div class="alert bad">${esc(e.message)}</div>`)}</div>`;
     return;
   }
-  const items = Array.isArray(capa) ? capa : capa.items || [];
+
+  const rows = capa.prescriptions || [];
+  const m = capa.metrics || {};
+  // 시급도 → 기한 → 지연일 순. 같은 P0 라도 기한이 이른 것이 먼저다.
+  const sorted = rows.slice().sort(
+    (a, b) =>
+      (a.priority || "P9").localeCompare(b.priority || "P9") ||
+      String(a.due_date || "").localeCompare(String(b.due_date || "")) ||
+      (b.days_overdue || 0) - (a.days_overdue || 0)
+  );
+  const overdue = m.overdue || 0;
 
   node.innerHTML = `
+    <div class="kpis">
+      ${kpi("발행", `<span class="num">${int(m.issued)}</span>`, "건",
+            "조치가 지시된 결함")}
+      ${kpi("기한 초과", `<span class="num">${int(overdue)}</span>`, "건", "",
+            overdue ? "crit" : "ok")}
+      ${kpi("에스컬레이션", `<span class="num">${int(m.escalated)}</span>`, "건",
+            "상위 보고 단계로 올라간 건", m.escalated ? "warn" : "ok")}
+      ${kpi("종결률", `<span class="num">${num((m.closure_rate || 0) * 100, 1)}</span>`,
+            "%", "검증까지 끝난 비율")}
+      ${kpi("기한 준수율", `<span class="num">${num((m.on_time_rate || 0) * 100, 1)}</span>`,
+            "%", "기한 안에 처리된 비율")}
+    </div>
     <div class="row">
-      ${scCard("시정·예방조치 (CAPA)", `${items.length}건 · 시급도 순`,
+      ${scCard("시정·예방조치 (CAPA)", `${sorted.length}건 · 시급도 순`,
         `<div class="note" style="margin-bottom:10px">
            CAPA는 결함을 <b>고치는 일(시정)</b>과 <b>다시 생기지 않게 하는 일(예방)</b>을
            나눠 관리하는 체계입니다. 보수만 반복하면 원인이 남아 같은 결함이 재발합니다.
+           단계별 진행 상황은 <a href="#bhc">건축물 건강검진</a>의 CAPA 보드에서 봅니다.
          </div>
-         <div class="table-wrap"><table id="cpTable"></table></div>`)}
+         <div class="table-wrap"><table id="cpTable"></table></div>
+         <div class="note" style="margin-top:8px">${esc(capa.note || "")}</div>`)}
     </div>`;
 
   renderTable(
     el("cpTable"),
     [
-      { h: "우선순위", cls: "num", render: (r) => int(r.priority ?? r.rank ?? 0) },
-      { h: "대상", render: (r) => esc(r.target || r.system || r.member_code || "—") },
-      { h: "구분", render: (r) => esc(r.kind || r.type || "시정") },
-      { h: "조치", render: (r) => esc(r.action || r.title || "—") },
-      { h: "근거", render: (r) => esc(r.basis || r.reason || "") },
+      {
+        h: "시급도",
+        cls: "nowrap",
+        render: (r) =>
+          `<span class="badge ${PRIORITY_TONE[r.priority] || "mute"}">${
+            esc(r.priority)} ${esc(r.priority_label)}</span>`,
+      },
+      { h: "결함", cls: "mono nowrap", render: (r) => esc(r.defect_id) },
+      {
+        h: "부재",
+        render: (r) => `${esc(r.member_label)} <span class="hint">${esc(r.system)}</span>`,
+      },
+      { h: "정도", cls: "nowrap", render: (r) => esc(r.severity) },
+      { h: "조치", render: (r) => esc(r.action) },
+      { h: "근거", cls: "nowrap", render: (r) => esc(r.basis) },
       {
         h: "기한",
-        render: (r) => (r.due ? esc(r.due) : r.due_days ? `${r.due_days}일 이내` : "—"),
+        cls: "nowrap",
+        render: (r) =>
+          `${esc(r.due_date || "—")}` +
+          (r.days_overdue > 0
+            ? ` <span class="badge crit">${int(r.days_overdue)}일 초과</span>`
+            : ""),
+      },
+      {
+        h: "상태",
+        cls: "nowrap",
+        render: (r) =>
+          (CAPA_STATE_LABEL[r.capa_state] || r.capa_state) +
+          (r.escalation
+            ? ` <span class="badge warn">${esc(r.escalation.level)}</span>`
+            : ""),
       },
     ],
-    items,
+    sorted,
     "CAPA 항목이 없습니다"
   );
 }
