@@ -411,3 +411,69 @@ function phUndoRectify() {
 
 /* 다른 화면이 갱신을 원하면 이 훅을 덮어쓴다 */
 let phOnChange = null;
+
+/* ═══ 검출 결과 브라우저 ═══════════════════════════════════
+ * QuickGuide STEP 03 의 사진 목록. 분석 완료 사진에 초록 표시를 붙이고,
+ * '정보 부족'은 노랑으로 구분한다 — 재촬영이 아니라 치수 측정으로 살릴 수
+ * 있는 사진이므로 실패와 섞어 두면 안 된다.
+ */
+const PV = { photos: [] };
+
+async function pvLoad() {
+  const inspId = el("pvInsp").value || App.inspections?.[0]?.id;
+  if (!inspId) return;
+  PV.photos = await api(`/api/photos?inspection_id=${inspId}`);
+  pvRender();
+}
+
+function pvRender() {
+  const want = el("pvState").value;
+  const rows = want ? PV.photos.filter((p) => p.analysis_state === want) : PV.photos;
+
+  const counts = PV.photos.reduce((a, p) => {
+    a[p.analysis_state] = (a[p.analysis_state] || 0) + 1;
+    return a;
+  }, {});
+  el("pvHint").textContent =
+    `전체 ${PV.photos.length} · 완료 ${counts.analyzed || 0} · ` +
+    `정보부족 ${counts.needs_scale || 0} · 분석전 ${counts.pending || 0}`;
+
+  const grid = el("pvGrid");
+  if (!rows.length) {
+    grid.innerHTML = '<div class="empty">해당하는 사진이 없습니다</div>';
+    return;
+  }
+  grid.innerHTML = rows
+    .map(
+      (p) => `
+      <div class="photo-card" data-photo="${p.id}">
+        <img class="thumb" loading="lazy"
+             src="${esc(p.image_url || p.url)}" alt="" />
+        <div class="pc-body">
+          <div class="pc-top">
+            <span class="dot ${p.analysis_state}"></span>
+            <span class="pc-id">#${p.id}</span>
+            <span class="pc-n">결함 ${int(p.defect_count ?? 0)}</span>
+          </div>
+          <div class="pc-note" title="${esc(p.analysis_note || p.member_code)}">
+            ${esc(p.analysis_note || p.member_code)}
+          </div>
+        </div>
+      </div>`
+    )
+    .join("");
+
+  grid.querySelectorAll("[data-photo]").forEach((n) =>
+    n.addEventListener("click", () => phOpen(Number(n.dataset.photo)))
+  );
+}
+
+function pvBind() {
+  el("pvReload")?.addEventListener("click", () => pvLoad().catch(console.error));
+  el("pvState")?.addEventListener("change", pvRender);
+  el("pvInsp")?.addEventListener("change", () => pvLoad().catch(console.error));
+  // 모달에서 무엇을 고치면 목록도 따라 갱신되어야 한다
+  phOnChange = () => pvLoad().catch(() => {});
+}
+
+document.addEventListener("DOMContentLoaded", pvBind);

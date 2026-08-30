@@ -30,7 +30,7 @@ function fillInspectionSelects() {
         )} · ${(i.safety_grade || "-").toUpperCase()}</option>`
     )
     .join("");
-  ["dtInsp", "rpInsp"].forEach((id) => {
+  ["dtInsp", "rpInsp", "pvInsp"].forEach((id) => {
     const s = el(id);
     if (s) s.innerHTML = opts;
   });
@@ -472,6 +472,7 @@ window.onViewShown = function (view) {
   if (view === "stitch") once("stitch", loadStitch);
   if (view === "drawings") once("drawings", loadDrawings);
   if (view === "deliver") once("deliver", loadDeliver);
+  if (view === "photos") once("photos", pvLoad);
   if (view === "progression") once("progression", loadProgression);
   if (view === "live") once("live", loadLive);
   if (view === "view3d") once("view3d", load3D);

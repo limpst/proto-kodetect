@@ -371,7 +371,12 @@ function dtRender(d) {
   el("dtStatus").innerHTML =
     quality +
     `<div class="alert info">분석 완료 — 결함 ${d.crack_count}건을 점검 회차에 저장하고
-     종합 안전등급을 ${String(d.inspection_grade || "-").toUpperCase()} 로 갱신했습니다.</div>`;
+     종합 안전등급을 ${String(d.inspection_grade || "-").toUpperCase()} 로 갱신했습니다.</div>
+     <div class="field-row" style="margin-top:8px">
+       <button class="ghost" id="dtOpenPhoto">사진 상세 — 치수 측정 · 원근 보정 · 손상 그리기</button>
+     </div>`;
+  // 스케일이 없거나 흐린 사진은 여기서 바로 고칠 수 있어야 흐름이 끊기지 않는다
+  el("dtOpenPhoto")?.addEventListener("click", () => phOpen(d.photo_id));
 }
 
 /* ─── 실행 ─────────────────────────────────────────────── */
