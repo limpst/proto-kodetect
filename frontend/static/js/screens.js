@@ -444,7 +444,7 @@ async function scCapa() {
   const overdue = m.overdue || 0;
 
   node.innerHTML = `
-    <div class="kpis">
+    <div class="kpi-grid" style="margin-bottom:14px">
       ${kpi("발행", `<span class="num">${int(m.issued)}</span>`, "건",
             "조치가 지시된 결함")}
       ${kpi("기한 초과", `<span class="num">${int(overdue)}</span>`, "건", "",

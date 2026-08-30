@@ -57,20 +57,31 @@ class PairMatch:
     H: np.ndarray            # j → i 변환 (축소본 좌표계)
     inliers: int
     total: int
-    reproj_error: float
+    reproj_error: float          # 왕복오차 — H가 수치적으로 멀쩡한가
+    transfer_error: float = 0.0  # 전달오차 — H가 대응점을 잘 설명하는가
 
     @property
     def confidence(self) -> float:
         """정합 신뢰도.
 
-        인라이어 수와 비율을 함께 본다. 비율만 보면 매칭이 5개뿐인데 전부
-        인라이어인 경우가 1.0으로 나와, 우연히 맞은 것과 구분되지 않는다.
+        세 가지를 함께 본다.
+        - 인라이어 **비율**: 비율만 보면 매칭 5개가 전부 인라이어일 때 1.0이
+          나와, 우연히 맞은 것과 구분되지 않는다.
+        - 인라이어 **개수**: 그래서 개수도 함께 본다.
+        - **전달오차**: 앞의 둘은 "점들이 서로 맞는가"만 본다. 렌즈 왜곡이
+          있으면 점은 잘 맞는데 평면 호모그래피로 설명이 안 되어 배치가
+          어긋난다. 실측에서 인라이어 16쌍·비율 만점인데 78px 틀린 경우가
+          나왔다. 그 실패를 신뢰도가 예고하지 못하면 지표로서 쓸모가 없다.
         """
         if self.total == 0:
             return 0.0
         ratio = self.inliers / self.total
         volume = min(self.inliers / 60.0, 1.0)
-        return round(0.6 * ratio + 0.4 * volume, 4)
+        base = 0.6 * ratio + 0.4 * volume
+        # 전달오차 1px까지는 온전히, 4px에서 0.35배로 깎는다. RANSAC 임계가
+        # 3px이라 그 근방부터는 모델이 맞지 않는다고 보는 것이 타당하다.
+        penalty = 1.0 / (1.0 + max(0.0, self.transfer_error - 1.0) / 1.6)
+        return round(base * penalty, 4)
 
 
 @dataclass
@@ -130,17 +141,17 @@ def _match_pair(
     good = [m for pair in knn if len(pair) == 2
             for m, n in [pair] if m.distance < LOWE_RATIO * n.distance]
     if len(good) < MIN_MATCH_COUNT:
-        return None, 0, len(good), 0.0
+        return None, 0, len(good), 0.0, 0.0
 
     src = np.float32([kp_j[m.queryIdx].pt for m in good]).reshape(-1, 1, 2)
     dst = np.float32([kp_i[m.trainIdx].pt for m in good]).reshape(-1, 1, 2)
     H, mask = cv2.findHomography(src, dst, cv2.RANSAC, RANSAC_THRESH, maxIters=4000)
     if H is None or mask is None:
-        return None, 0, len(good), 0.0
+        return None, 0, len(good), 0.0, 0.0
 
     inliers = int(mask.sum())
     if inliers < MIN_MATCH_COUNT:
-        return None, inliers, len(good), 0.0
+        return None, inliers, len(good), 0.0, 0.0
 
     # 역방향 검증 — H로 보냈다 되돌렸을 때 제자리로 오는지 본다.
     # RANSAC은 퇴화된 해(모든 점이 한 직선)에도 높은 인라이어를 줄 수 있는데,
@@ -148,16 +159,27 @@ def _match_pair(
     try:
         Hinv = np.linalg.inv(H)
     except np.linalg.LinAlgError:
-        return None, inliers, len(good), 0.0
+        return None, inliers, len(good), 0.0, 0.0
 
     idx = mask.ravel().astype(bool)
     fwd = cv2.perspectiveTransform(src[idx], H)
     back = cv2.perspectiveTransform(fwd, Hinv)
     err = float(np.sqrt(((back - src[idx]) ** 2).sum(axis=2)).mean())
     if err > 2.0:
-        return None, inliers, len(good), err
+        return None, inliers, len(good), err, 0.0
 
-    return H, inliers, len(good), err
+    # 전방 전달오차 — 호모그래피가 대응점을 **얼마나 잘 설명하는가**.
+    #
+    # 위의 왕복오차와는 다른 것을 잰다. 왕복오차는 H가 수치적으로 멀쩡한지만
+    # 보므로, 잘 조건화되었지만 형편없이 맞는 H에도 0에 가깝게 나온다. 실측에서
+    # 배럴왜곡이 든 사진의 왕복오차는 정상인데 배치는 78px 어긋났다.
+    #
+    # 렌즈 왜곡이 있으면 평면 호모그래피로는 원리적으로 맞출 수 없어 이 값이
+    # 커진다. RANSAC 임계 안에 든 점만 보는데도 커진다면, 그것은 모델이 틀렸다는
+    # 뜻이다 — 대응점이 틀린 것이 아니라.
+    transfer = float(np.sqrt(((fwd - dst[idx]) ** 2).sum(axis=2)).mean())
+
+    return H, inliers, len(good), err, transfer
 
 
 def _scale_of(H: np.ndarray) -> float:
