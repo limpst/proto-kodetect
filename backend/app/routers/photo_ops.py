@@ -28,7 +28,8 @@ from ..domain import DEFECT_LABELS_KO, DefectType, Environment
 from ..grading import assess_defect
 from ..models import Building, Defect, Inspection, Photo
 from ..services.photo_edit import map_points, rectify_quad, scale_from_reference
-from ..services.vision import CrackDetector, render_overlay
+from ..services.learned import load_detector
+from ..services.vision import render_overlay
 from .detect import _analysis_state, _recompute_inspection
 
 router = APIRouter(prefix="/api/photos", tags=["photo-ops"])
@@ -94,7 +95,8 @@ def _run_detection(db: Session, p: Photo, sensitivity: float = 1.0) -> dict:
         removed += 1
 
     env = _environment(db, p)
-    result = CrackDetector(sensitivity=sensitivity).detect(image, p.gsd_mm_per_px)
+    detector = load_detector(settings.segmenter_path, sensitivity=sensitivity)
+    result = detector.detect(image, p.gsd_mm_per_px)
     assessments = [
         assess_defect(DefectType.CRACK, width_mm=c.width_mm_p95, environment=env)
         for c in result.cracks
@@ -131,6 +133,32 @@ def _run_detection(db: Session, p: Photo, sensitivity: float = 1.0) -> dict:
                 source="ai",
             )
         )
+    # 면적형 결함 — 학습 모델만 채운다. 고전 검출기에서는 빈 목록이라 아무 일도 없다.
+    n_area = 0
+    for a in getattr(result, "area_defects", []):
+        try:
+            dt = DefectType(a["defect_type"])
+        except ValueError:
+            continue
+        assess = assess_defect(dt, area_ratio=a["area_ratio"], environment=env)
+        x, y, bw, bh = a["bbox"]
+        db.add(
+            Defect(
+                inspection_id=p.inspection_id,
+                photo_id=p.id,
+                defect_type=dt.value,
+                member_code=p.member_code,
+                area_ratio=a["area_ratio"],
+                grade=assess.grade.value,
+                severity=assess.severity,
+                repair_required=assess.repair_required,
+                confidence=a["confidence"],
+                basis=assess.basis,
+                bbox=f"{x},{y},{bw},{bh}",
+                source="ai",
+            )
+        )
+        n_area += 1
     db.commit()
 
     insp = db.get(Inspection, p.inspection_id)
@@ -142,6 +170,8 @@ def _run_detection(db: Session, p: Photo, sensitivity: float = 1.0) -> dict:
     ) or 0
     return {
         "detected": len(result.cracks),
+        "area_defects": n_area,
+        "detector": getattr(result, "detector", "opencv-ridge-baseline"),
         "removed_auto": removed,
         "manual_preserved": int(kept),
         "sharpness": result.sharpness,

@@ -11,15 +11,44 @@ const App = {
 };
 
 /* ─── 요청 ──────────────────────────────────────────────── */
+/** 서버 오류 본문을 사람이 읽을 한 문장으로 만든다.
+ *
+ * FastAPI 는 422(검증 실패) 에서 detail 을 **객체 배열**로 돌려준다.
+ * 이걸 그대로 Error 에 넣으면 화면에 "[object Object]" 가 뜨고, 사용자는
+ * 물론 개발자도 원인을 알 수 없다. 필드 위치와 사유를 풀어 쓴다.
+ */
+function errorText(body, status) {
+  const d = body && body.detail;
+  if (typeof d === "string" && d) return d;
+  if (Array.isArray(d) && d.length) {
+    return d
+      .map((e) => {
+        const at = (e.loc || []).filter((x) => x !== "body").join(".");
+        return at ? `${at}: ${e.msg}` : e.msg;
+      })
+      .join(" / ");
+  }
+  if (d && typeof d === "object") return JSON.stringify(d);
+  return `HTTP ${status}`;
+}
+
 async function api(path, opts = {}) {
-  const r = await fetch(path, { credentials: "same-origin", ...opts });
+  // 본문이 문자열(JSON)인데 헤더가 없으면 fetch 는 text/plain 을 붙인다.
+  // FastAPI 는 그걸 JSON 본문으로 읽지 않아 422 가 난다 — 여기서 채워 준다.
+  const init = { credentials: "same-origin", ...opts };
+  if (typeof init.body === "string") {
+    const h = new Headers(init.headers || {});
+    if (!h.has("content-type")) h.set("content-type", "application/json");
+    init.headers = h;
+  }
+  const r = await fetch(path, init);
   if (r.status === 401) {
     location.href = "/login?next=" + encodeURIComponent(location.pathname);
     throw new Error("unauthenticated");
   }
   if (!r.ok) {
     const body = await r.json().catch(() => ({}));
-    throw new Error(body.detail || `HTTP ${r.status}`);
+    throw new Error(errorText(body, r.status));
   }
   return r.json();
 }

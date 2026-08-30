@@ -30,6 +30,8 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from .segmodel import get_segmenter
+
 # ─── 오검출 제거 임계값 ────────────────────────────────────────
 MIN_AREA_PX = 60          # 이보다 작은 blob은 노이즈로 간주
 MIN_LENGTH_PX = 40        # 균열로 인정할 최소 골격 길이
@@ -84,6 +86,11 @@ class DetectionResult:
     sharpness: float = 0.0
     quality_ok: bool = True
     quality_note: str = ""
+    # 면적형 결함(박리·백태·철근노출) — 학습 모델만 채운다.
+    # 고전 검출기는 균열만 찾으므로 항상 비어 있다.
+    area_defects: list[dict] = field(default_factory=list)
+    # 어느 검출기가 돌았는지. 결과 해석의 전제라 결과에 남긴다.
+    detector: str = "opencv-ridge-baseline"
 
 
 def _equalize(gray: np.ndarray) -> np.ndarray:
@@ -670,6 +677,7 @@ class CrackDetector:
         tile_size_px: int = 1024,
         tile_overlap_px: int = 128,
         fp_model: Path | None = None,
+        use_model: bool = True,
     ) -> None:
         self.min_length_px = min_length_px
         self.min_elongation = min_elongation
@@ -684,6 +692,7 @@ class CrackDetector:
         self.tile_threshold_px = tile_threshold_px
         self.tile_size_px = tile_size_px
         self.tile_overlap_px = tile_overlap_px
+        self.use_model = use_model
         self.fp_filter = FalsePositiveFilter.load(fp_model or DEFAULT_FP_MODEL)
         # 문턱은 신뢰도 점수의 출처에 따라 다르다. 학습 분류기의 확률과
         # 휴리스틱 점수는 스케일이 달라 같은 값을 쓰면 한쪽이 반드시 어긋난다.
@@ -709,6 +718,7 @@ class CrackDetector:
 
         sharp = sharpness_score(gray)
         mask, _, _ = _segment(gray, self.sensitivity)
+        mask = self._augment_mask(gray, mask)
         result = self._detect_from_mask(gray, mask, mm_per_px)
 
         quality_ok = sharp >= self.min_sharpness
@@ -721,6 +731,32 @@ class CrackDetector:
                  "— 균열폭이 과대평가될 수 있어 재촬영을 권고합니다"
         )
         return result
+
+    def _augment_mask(self, gray: np.ndarray, mask: np.ndarray) -> np.ndarray:
+        """학습 분할기가 있으면 그 마스크를 합친다.
+
+        재현율 병목이 후보 생성에 있기 때문에 여기서 손을 댄다. 배경 대비가
+        낮아 능선·암부 조건을 동시에 넘지 못한 균열은 하류에서 되살릴 방법이
+        없다 — 없는 후보는 분류기가 살릴 수 없다.
+
+        합집합으로 두는 이유: 고전 분할이 이미 잘 잡던 뚜렷한 균열까지 모델
+        성능에 인질로 잡히지 않게 한다. 늘어난 후보의 정밀도는 하류의 형상
+        분류기가 지킨다 — 그것이 분류기를 둔 목적이다.
+
+        모델이 없으면 아무 일도 하지 않는다. 학습 산출물이 배포에 없더라도
+        검출은 동작해야 한다.
+        """
+        if not self.use_model:
+            return mask
+        seg = get_segmenter()
+        if seg is None:
+            return mask
+        try:
+            learned = seg.mask(gray, self.sensitivity)
+        except Exception:
+            # 추론이 실패해도 검출 전체를 멈추지 않는다.
+            return mask
+        return np.maximum(mask, learned)
 
     def _detect_from_mask(
         self, gray: np.ndarray, mask: np.ndarray, mm_per_px: float | None
@@ -858,6 +894,7 @@ class CrackDetector:
             max_link_px=self.max_link_px,
             min_align=self.min_align,
             tile_threshold_px=10**9,
+            use_model=self.use_model,
         )
         inner.fp_filter = self.fp_filter
 
@@ -887,6 +924,7 @@ class CrackDetector:
             max_link_px=self.max_link_px,
             min_align=self.min_align,
             tile_threshold_px=10**9,
+            use_model=self.use_model,
         )
         merged.fp_filter = self.fp_filter
         result = merged._detect_from_mask(gray, full_mask, mm_per_px)

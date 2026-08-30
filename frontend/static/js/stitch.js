@@ -134,6 +134,7 @@ async function runStitch() {
   try {
     const r = await api("/api/stitch/group", {
       method: "POST",
+      headers: { "content-type": "application/json" },
       body: JSON.stringify({
         group_id: gid,
         ordered: el("stOrdered").checked,

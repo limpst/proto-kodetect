@@ -38,9 +38,19 @@ class Settings(BaseSettings):
     focal_length_mm: float = 12.29
     image_width_px: int = 5280
 
+    # ─── 학습 모델 ──────────────────────────────────────────
+    # 파일이 있으면 학습 검출기를, 없으면 고전 검출기를 쓴다.
+    # 없다고 서비스가 멎으면 안 되므로 존재 여부로만 판단한다.
+    segmenter_model: str = "models/seg_v1/segmenter.onnx"
+
     # ─── 검출 파라미터 ──────────────────────────────────────
     min_crack_length_px: int = 40
     detection_confidence_floor: float = 0.35
+
+    @property
+    def segmenter_path(self) -> Path | None:
+        p = ROOT / self.segmenter_model
+        return p if p.exists() else None
 
     @property
     def uploads_dir(self) -> Path:

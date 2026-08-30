@@ -17,7 +17,8 @@ from ..domain import DefectType, Environment
 from ..grading import DefectAssessment, assess_defect, assess_inspection
 from ..models import Building, Defect, Inspection, Photo
 from ..schemas import CrackOut, DetectionOut
-from ..services.vision import CrackDetector, gsd_mm_per_px, render_overlay
+from ..services.learned import load_detector
+from ..services.vision import gsd_mm_per_px, render_overlay
 
 router = APIRouter(prefix="/api/detect", tags=["detect"])
 
@@ -124,7 +125,8 @@ async def detect_image(
         gsd_mm_per_px_in, distance_m, gimbal_pitch_deg, w
     )
 
-    detector = CrackDetector(sensitivity=sensitivity)
+    # 학습 모델이 있으면 그것을, 없으면 고전 검출기를 쓴다.
+    detector = load_detector(settings.segmenter_path, sensitivity=sensitivity)
     result = detector.detect(image, mm_per_px)
 
     # 등급 판정
@@ -250,7 +252,7 @@ def detect_demo(
     filename = f"{stem}.jpg"
     cv2.imwrite(str(settings.uploads_dir / filename), image)
 
-    detector = CrackDetector()
+    detector = load_detector(settings.segmenter_path)
     result = detector.detect(image, sample.mm_per_px)
     assessments = [
         assess_defect(DefectType.CRACK, width_mm=c.width_mm_p95, environment=environment)

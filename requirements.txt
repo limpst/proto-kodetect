@@ -11,6 +11,8 @@ numpy>=2.0,<3
 opencv-python-headless>=4.10
 pillow>=11
 httpx>=0.27
+# 학습 모델 추론 전용. torch(약 200MB) 대신 15MB 로 끝난다.
+onnxruntime>=1.18
 psycopg[binary]>=3.2
 
 # 보고서 산출물 — 손상물량표(Excel) · 사진대지(Word) · 외관조사망도(DXF)

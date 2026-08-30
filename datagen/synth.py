@@ -58,6 +58,10 @@ class SynthSample:
     image: np.ndarray
     crack_mask: np.ndarray
     defect_mask: np.ndarray
+    # 다중 클래스 라벨 — 0=배경, 1..7=DEFECT_TYPES 순서.
+    # 세그멘테이션 학습에 쓰는 정답이다. 이진 마스크 두 장으로는 유형을
+    # 구분할 수 없어 "박리인가 백태인가"를 모델이 배울 수 없다.
+    label_mask: np.ndarray
     defects: list[SynthDefect]
     mm_per_px: float
     meta: dict
@@ -388,6 +392,7 @@ def generate_sample(
     defect_mask = np.zeros((h, w), np.uint8)
     defects: list[SynthDefect] = []
     singles: list[np.ndarray] = []
+    other_singles: list[tuple[str, np.ndarray]] = []
 
     is_clean = rng.random() < clean_prob
     if not is_clean:
@@ -403,17 +408,34 @@ def generate_sample(
 
         for _ in range(int(rng.integers(0, max_other + 1))):
             kind = str(rng.choice(DEFECT_TYPES[1:]))
-            defects.append(draw_other_defect(rng, img, defect_mask, kind))
+            one = np.zeros((h, w), np.uint8)
+            defects.append(draw_other_defect(rng, img, one, kind))
+            other_singles.append((kind, one))
+            defect_mask = np.maximum(defect_mask, one)
 
     img = np.clip(img, 0, 255).astype(np.uint8)
-    warped = apply_drone_effects(rng, img, [crack_mask, defect_mask] + singles)
+    n_crack = len(singles)
+    warped = apply_drone_effects(
+        rng, img,
+        [crack_mask, defect_mask] + singles + [m for _, m in other_singles],
+    )
     img, all_masks = warped
     crack_mask, defect_mask = all_masks[0], all_masks[1]
+    crack_singles = all_masks[2 : 2 + n_crack]
+    other_warped = all_masks[2 + n_crack :]
+
+    # 다중 클래스 라벨 합성. 면적 결함을 먼저 칠하고 균열을 마지막에 덮는다 —
+    # 균열은 가늘어 다른 결함 위에 겹치면 사라지는데, 폭 판정의 근거라 잃으면 안 된다.
+    label_mask = np.zeros((h, w), np.uint8)
+    for (kind, _), m in zip(other_singles, other_warped):
+        label_mask[m > 0] = DEFECT_TYPES.index(kind) + 1
+    for m in crack_singles:
+        label_mask[m > 0] = DEFECT_TYPES.index("crack") + 1
 
     # 정답 폭/길이는 기하변환까지 끝난 최종 마스크에서 측정한다.
     crack_defects = [d for d in defects if d.defect_type == "crack"]
     surviving: list[SynthDefect] = []
-    for d, m in zip(crack_defects, all_masks[2:]):
+    for d, m in zip(crack_defects, crack_singles):
         stats = measure_mask(m, mm_per_px)
         if stats is None:
             continue
@@ -431,6 +453,7 @@ def generate_sample(
         image=img,
         crack_mask=crack_mask,
         defect_mask=defect_mask,
+        label_mask=label_mask,
         defects=defects,
         mm_per_px=round(mm_per_px, 5),
         meta={
@@ -456,12 +479,15 @@ def write_sample(sample: SynthSample, out_dir: Path, index: int) -> dict:
                 [int(cv2.IMWRITE_JPEG_QUALITY), 92])
     cv2.imwrite(str(out_dir / "masks" / f"{stem}_crack.png"), sample.crack_mask)
     cv2.imwrite(str(out_dir / "masks" / f"{stem}_defect.png"), sample.defect_mask)
+    cv2.imwrite(str(out_dir / "masks" / f"{stem}_label.png"), sample.label_mask)
 
     record = {
         "id": stem,
         "image": f"images/{stem}.jpg",
         "crack_mask": f"masks/{stem}_crack.png",
         "defect_mask": f"masks/{stem}_defect.png",
+        "label_mask": f"masks/{stem}_label.png",
+        "classes": ["background", *DEFECT_TYPES],
         "mm_per_px": sample.mm_per_px,
         "meta": sample.meta,
         "defects": [asdict(d) for d in sample.defects],

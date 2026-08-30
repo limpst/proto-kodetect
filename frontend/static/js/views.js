@@ -478,6 +478,11 @@ window.onViewShown = function (view) {
   if (view === "view3d") once("view3d", load3D);
   if (view === "policy") once("policy", loadPolicy);
   if (view === "report" && !el("rpFrame").src) openReport();
+
+  // screens.js 가 만드는 화면들(포트폴리오·알림·수동입력·검출성능·점검회차·
+  // 채널·결함통계·CAPA)은 nav.js 가 빈 섹션만 만들어 둔다. 여기서 채우지
+  // 않으면 제목만 있고 본문이 없는 화면이 되어 고장으로 보인다.
+  if (typeof SCREENS === "object" && SCREENS[view]) once(view, SCREENS[view]);
 };
 
 document.addEventListener("DOMContentLoaded", () => {

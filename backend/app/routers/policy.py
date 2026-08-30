@@ -141,8 +141,10 @@ def recommend(building_id: int, db: Session = Depends(get_db)) -> dict:
         actions = []
         for e in expected_grade:
             actions.append(3 if e >= 2.6 else 2 if e >= 1.8 else 1 if e >= 0.9 else 0)
-        values = {"expected": np.zeros((n, N_WORKER_ACTIONS)),
-                  "cvar": np.zeros((n, N_WORKER_ACTIONS))}
+        # 값을 0으로 채우면 화면에 "기대가치 0.000" 으로 찍혀 마치 학습된
+        # 정책이 그 조치를 무가치로 평가한 것처럼 보인다. 없는 값은 없다고
+        # 표시해야 한다 — None 을 내려 화면에서 '—' 로 그린다.
+        values = None
         source = "규칙 기반 (강화학습 정책 미학습)"
         manager = 1
     else:
@@ -163,8 +165,10 @@ def recommend(building_id: int, db: Session = Depends(get_db)) -> dict:
                 ),
                 "action": ACTION_LABELS_KO[a],
                 "action_index": a,
-                "expected_value": round(float(values["expected"][i][a]), 3),
-                "cvar": round(float(values["cvar"][i][a]), 3),
+                "expected_value": (
+                    round(float(values["expected"][i][a]), 3) if values else None
+                ),
+                "cvar": round(float(values["cvar"][i][a]), 3) if values else None,
                 "belief_grade": g,
                 "expected_grade_num": round(float(expected_grade[i]), 2),
                 "rationale": _rationale(a, expected_grade[i]),
