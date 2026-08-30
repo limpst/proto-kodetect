@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import secrets
 from pathlib import Path
 
@@ -87,13 +88,28 @@ class Settings(BaseSettings):
         url = self.sqlalchemy_url
         scheme = url.split("://", 1)[0]
         is_sqlite = scheme.startswith("sqlite")
-        ephemeral_root = str(self.storage_dir).startswith(("/tmp", "\tmp"))
+
+        # 경로 모양으로 영속성을 추측하면 틀린다. 지금 배포본의 저장소는
+        # 'storage' 라는 평범한 상대 경로인데도 재배포마다 사라진다 —
+        # 컨테이너째 교체되기 때문이다. 그래서 '여기가 교체되는 컨테이너인가'
+        # 를 직접 본다. Render 는 RENDER 를, 디스크를 붙이면 마운트 경로를
+        # RENDER_DISK_MOUNT_PATH 로 알려준다.
+        on_container = bool(os.environ.get("RENDER"))
+        mount = os.environ.get("RENDER_DISK_MOUNT_PATH")
+        # 문자열 접두사로 비교하면 플랫폼마다 구분자가 달라 어긋난다.
+        on_disk = bool(mount) and self.storage_dir.resolve().is_relative_to(
+            Path(mount).resolve()
+        )
+        # 로컬(컨테이너 아님)에서는 파일이 그대로 남는다. 없는 위험을
+        # 경고하면 진짜 경고까지 무시하게 된다.
+        storage_persistent = on_disk or not on_container
+
         return {
             "database": "sqlite" if is_sqlite else scheme,
             # 관리형 Postgres 는 컨테이너와 수명이 분리돼 있다.
-            "database_persistent": not is_sqlite,
+            "database_persistent": not is_sqlite or not on_container,
             "storage_dir": str(self.storage_dir),
-            "storage_persistent": not ephemeral_root,
+            "storage_persistent": storage_persistent,
         }
 
 
