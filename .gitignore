@@ -37,3 +37,5 @@ docs/bench/sample_checkup_report.html
 PDF/*.pdf
 docs/server_ps.log
 docs/server_ps.log.err
+models/seg_dataset.npz
+models/*.ckpt

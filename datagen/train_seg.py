@@ -38,14 +38,24 @@ sys.path.insert(0, str(ROOT / "backend"))
 
 from .synth import generate_sample  # noqa: E402
 
-PATCH = 256
+PATCH = 256              # 추론 타일 크기 (segmodel.TILE 과 같아야 한다)
+TRAIN_CROP = 192
+"""학습 조각 크기.
+
+추론은 256으로 하는데 학습은 192로 한다. U-Net 은 완전 합성곱이라 입력 크기에
+구애받지 않으므로 문제되지 않고, 계산량이 (192/256)² = 0.56배로 줄어든다.
+이 환경은 긴 작업을 끝까지 두지 않아서 — 40분짜리 학습이 세 번 연속 중단되었다 —
+한 번에 도는 양을 줄이는 것이 실질적인 제약이다.
+"""
 POS_RATIO = 0.7          # 조각 중 균열을 포함한 것의 비율
 OUT = ROOT / "models" / "crack_seg.pt"
+CKPT = ROOT / "models" / "crack_seg.ckpt"   # 이어학습용 (옵티마이저·스케줄러 포함)
+CACHE = ROOT / "models" / "seg_dataset.npz"
 
 
 # ─── 조각 뽑기 ─────────────────────────────────────────────────
-def _crop(img, mask, y, x):
-    return img[y : y + PATCH, x : x + PATCH], mask[y : y + PATCH, x : x + PATCH]
+def _crop(img, mask, y, x, size=TRAIN_CROP):
+    return img[y : y + size, x : x + size], mask[y : y + size, x : x + size]
 
 
 def patches_from(sample, rng: np.random.Generator, n: int) -> list[tuple]:
@@ -55,7 +65,7 @@ def patches_from(sample, rng: np.random.Generator, n: int) -> list[tuple]:
         img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     m = (sample.crack_mask > 0).astype(np.float32)
     h, w = img.shape[:2]
-    if h < PATCH or w < PATCH:
+    if h < TRAIN_CROP or w < TRAIN_CROP:
         return []
 
     ys, xs = np.nonzero(m)
@@ -64,11 +74,11 @@ def patches_from(sample, rng: np.random.Generator, n: int) -> list[tuple]:
         want_pos = len(ys) > 0 and rng.random() < POS_RATIO
         if want_pos:
             k = int(rng.integers(len(ys)))
-            cy = int(np.clip(ys[k] - PATCH // 2 + rng.integers(-40, 41), 0, h - PATCH))
-            cx = int(np.clip(xs[k] - PATCH // 2 + rng.integers(-40, 41), 0, w - PATCH))
+            cy = int(np.clip(ys[k] - TRAIN_CROP // 2 + rng.integers(-32, 33), 0, h - TRAIN_CROP))
+            cx = int(np.clip(xs[k] - TRAIN_CROP // 2 + rng.integers(-32, 33), 0, w - TRAIN_CROP))
         else:
-            cy = int(rng.integers(0, h - PATCH + 1))
-            cx = int(rng.integers(0, w - PATCH + 1))
+            cy = int(rng.integers(0, h - TRAIN_CROP + 1))
+            cx = int(rng.integers(0, w - TRAIN_CROP + 1))
         out.append(_crop(img, m, cy, cx))
     return out
 
@@ -133,17 +143,48 @@ def pixel_scores(net, torch, X, Y, thr=0.45, bs=32) -> dict:
     return {"precision": round(prec, 4), "recall": round(rec, 4), "f1": round(f1, 4)}
 
 
+def load_or_build(a) -> tuple:
+    """데이터셋을 한 번만 만들고 캐시한다.
+
+    표본 생성에만 4분이 걸린다. 이어학습으로 여러 번 나눠 도는데 매번 다시
+    만들면 그 시간이 학습 시간을 넘는다. 시드가 같으면 내용도 같으므로
+    캐시가 정당하다.
+    """
+    if a.cache.exists() and not a.rebuild:
+        z = np.load(a.cache)
+        if int(z["crop"]) == TRAIN_CROP and int(z["samples"]) == a.samples:
+            print(f"데이터 캐시 사용 — 학습 {len(z['X'])} · 검증 {len(z['Xv'])}", flush=True)
+            return z["X"], z["Y"], z["Xv"], z["Yv"]
+        print("캐시 설정이 달라 다시 만듭니다", flush=True)
+
+    print(f"학습 조각 생성 — 표본 {a.samples} × {a.per_sample}", flush=True)
+    X, Y = build(a.samples, a.per_sample, a.seed)
+    # 검증은 학습에 쓰지 않은 시드에서 따로 만든다. 같은 표본에서 자른 조각을
+    # 나누면 배경 질감이 겹쳐 성능이 부풀려진다.
+    Xv, Yv = build(max(30, a.samples // 12), 4, a.seed + 90001)
+    a.cache.parent.mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(a.cache, X=X, Y=Y, Xv=Xv, Yv=Yv,
+                        crop=TRAIN_CROP, samples=a.samples)
+    return X, Y, Xv, Yv
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--samples", type=int, default=900)
-    ap.add_argument("--per-sample", type=int, default=6)
-    ap.add_argument("--epochs", type=int, default=12)
-    ap.add_argument("--batch", type=int, default=16)
+    ap.add_argument("--samples", type=int, default=300)
+    ap.add_argument("--per-sample", type=int, default=5)
+    ap.add_argument("--epochs", type=int, default=8, help="총 에폭 수")
+    ap.add_argument("--epochs-this-run", type=int, default=1,
+                    help="이번 실행에서 돌 에폭 수. 환경이 긴 작업을 끊으므로 "
+                         "나눠 돌고 체크포인트로 이어붙인다")
+    ap.add_argument("--batch", type=int, default=12)
     ap.add_argument("--base", type=int, default=16)
     ap.add_argument("--lr", type=float, default=2e-3)
     ap.add_argument("--threads", type=int, default=6)
     ap.add_argument("--seed", type=int, default=7)
     ap.add_argument("--out", type=Path, default=OUT)
+    ap.add_argument("--ckpt", type=Path, default=CKPT)
+    ap.add_argument("--cache", type=Path, default=CACHE)
+    ap.add_argument("--rebuild", action="store_true")
     a = ap.parse_args(argv)
 
     import torch
@@ -153,30 +194,46 @@ def main(argv=None) -> int:
     torch.set_num_threads(a.threads)
     torch.manual_seed(a.seed)
 
-    print(f"학습 조각 생성 — 표본 {a.samples} × {a.per_sample}", flush=True)
-    X, Y = build(a.samples, a.per_sample, a.seed)
-    # 검증은 학습에 쓰지 않은 시드에서 따로 만든다. 같은 표본에서 자른 조각을
-    # 나누면 배경 질감이 겹쳐 성능이 부풀려진다.
-    Xv, Yv = build(max(40, a.samples // 12), 4, a.seed + 90001)
+    X, Y, Xv, Yv = load_or_build(a)
     print(f"학습 {len(X)} 조각 · 검증 {len(Xv)} 조각 "
           f"(양성 픽셀 {Y.mean()*100:.2f}%)", flush=True)
 
     net = UNetSmall(base=a.base)
-    n_par = sum(p.numel() for p in net.parameters())
     opt = torch.optim.AdamW(net.parameters(), lr=a.lr, weight_decay=1e-4)
-    steps = a.epochs * max(1, len(X) // a.batch)
-    sched = torch.optim.lr_scheduler.OneCycleLR(opt, max_lr=a.lr, total_steps=steps)
-    print(f"파라미터 {n_par/1e6:.2f}M · 스텝 {steps}", flush=True)
+    per_epoch = max(1, len(X) // a.batch)
+    sched = torch.optim.lr_scheduler.OneCycleLR(
+        opt, max_lr=a.lr, total_steps=a.epochs * per_epoch
+    )
 
-    rng = np.random.default_rng(a.seed)
+    done = 0
     best = -1.0
-    best_scores: dict = {}
+    if a.ckpt.exists():
+        ck = torch.load(a.ckpt, map_location="cpu", weights_only=False)
+        net.load_state_dict(ck["state_dict"])
+        opt.load_state_dict(ck["opt"])
+        sched.load_state_dict(ck["sched"])
+        done = ck["epoch"]
+        best = ck.get("best", -1.0)
+        print(f"이어학습 — {done} 에폭 완료됨 (최고 F1 {best:.4f})", flush=True)
+
+    if done >= a.epochs:
+        print(f"이미 {a.epochs} 에폭을 마쳤습니다.")
+        return 0
+
+    n_par = sum(p.numel() for p in net.parameters())
+    print(f"파라미터 {n_par/1e6:.2f}M · 에폭당 {per_epoch} 스텝 · "
+          f"이번 실행 {a.epochs_this_run} 에폭 ({done+1}~"
+          f"{min(done+a.epochs_this_run, a.epochs)}/{a.epochs})", flush=True)
+
+    rng = np.random.default_rng(a.seed + done)
     t0 = time.time()
-    for ep in range(a.epochs):
+    for k in range(a.epochs_this_run):
+        ep = done + k
+        if ep >= a.epochs:
+            break
         net.train()
         idx = rng.permutation(len(X))
-        tot = 0.0
-        nb = 0
+        tot, nb = 0.0, 0
         for i in range(0, len(idx) - a.batch + 1, a.batch):
             b = idx[i : i + a.batch]
             xb = torch.from_numpy(X[b]).float().unsqueeze(1) / 255.0
@@ -186,32 +243,34 @@ def main(argv=None) -> int:
             loss.backward()
             opt.step()
             sched.step()
-            tot += float(loss)
+            tot += float(loss.detach())
             nb += 1
         sc = pixel_scores(net, torch, Xv, Yv)
         print(f"  epoch {ep+1:>2}/{a.epochs}  손실 {tot/max(nb,1):.4f}  "
               f"정밀도 {sc['precision']:.3f}  재현율 {sc['recall']:.3f}  "
               f"F1 {sc['f1']:.3f}  ({time.time()-t0:.0f}s)", flush=True)
+
+        a.out.parent.mkdir(parents=True, exist_ok=True)
+        # 체크포인트는 매 에폭 저장한다 — 언제 끊겨도 잃는 것이 1에폭뿐이다
+        torch.save({"state_dict": net.state_dict(), "opt": opt.state_dict(),
+                    "sched": sched.state_dict(), "epoch": ep + 1,
+                    "best": max(best, sc["f1"]), "base": a.base}, a.ckpt)
+        # 배포용 가중치는 검증 F1 이 갱신될 때만 덮어쓴다
         if sc["f1"] > best:
             best = sc["f1"]
-            best_scores = sc
-            a.out.parent.mkdir(parents=True, exist_ok=True)
-            torch.save(
-                {
-                    "state_dict": net.state_dict(),
-                    "base": a.base,
-                    "patch": PATCH,
-                    "epoch": ep + 1,
-                    "pixel_scores": sc,
-                    "trained_on": "synthetic",
-                    "note": "균열만 양성. 박리·백태·철근노출은 음성으로 학습.",
-                },
-                a.out,
-            )
+            torch.save({"state_dict": net.state_dict(), "base": a.base,
+                        "patch": PATCH, "train_crop": TRAIN_CROP, "epoch": ep + 1,
+                        "pixel_scores": sc, "trained_on": "synthetic",
+                        "note": "균열만 양성. 박리·백태·철근노출은 음성으로 학습."},
+                       a.out)
 
-    print(f"\n최고 픽셀 F1 {best:.4f} {best_scores} → {a.out}")
-    print("검출기 단위 성능은 `python -m datagen.evaluate` 로 확인하십시오 — "
-          "픽셀 지표와 균열 단위 지표는 다릅니다.")
+    left = a.epochs - min(done + a.epochs_this_run, a.epochs)
+    print(f"\n최고 픽셀 F1 {best:.4f} → {a.out}")
+    if left:
+        print(f"{left} 에폭 남음 — 같은 명령을 다시 실행하면 이어서 돕니다.")
+    else:
+        print("학습 완료. 검출기 단위 성능은 `python -m datagen.evaluate` 로 "
+              "확인하십시오 — 픽셀 지표와 균열 단위 지표는 다릅니다.")
     return 0
 
 

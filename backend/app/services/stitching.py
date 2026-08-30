@@ -94,6 +94,7 @@ class StitchResult:
     canvas_size: tuple[int, int] = (0, 0)
     mm_per_px: float | None = None
     scale_drift: float = 1.0
+    cycle_error: float = 0.0   # 변환 상호 모순 (px). 렌즈 왜곡의 지표
     elapsed_sec: float = 0.0
     warnings: list[str] = field(default_factory=list)
 
@@ -104,14 +105,37 @@ class StitchResult:
 
 
 # ─── 특징 추출 ─────────────────────────────────────────────────
+NOISE_SIGMA_TRIGGER = 3.0
+"""이 값을 넘으면 노이즈 억제를 건다.
+
+실측 추정치: 깨끗한 합성 표본 0.49, σ=4 주입 시 4.07, σ=8 시 8.04, σ=12 시 12.03.
+추정이 주입값과 거의 일치하므로 문턱을 실제 σ 단위로 읽어도 된다.
+"""
+
+
 def _work_scale(shape: tuple[int, int]) -> float:
     h, w = shape[:2]
     m = max(h, w)
     return 1.0 if m <= WORK_MAX_SIDE else WORK_MAX_SIDE / m
 
 
+def _noise_sigma(gray: np.ndarray) -> float:
+    """센서 노이즈 표준편차 추정 (Immerkær 방식).
+
+    라플라시안 성격의 3×3 커널을 씌우면 매끄러운 성분은 사라지고 고주파만
+    남는다. 그 절대값 평균에 상수를 곱해 σ를 얻는다. 콘크리트 질감도 고주파라
+    다소 과대 추정되지만, **상대적 크기**만 필요하므로 문제되지 않는다.
+    """
+    h, w = gray.shape[:2]
+    if h < 3 or w < 3:
+        return 0.0
+    k = np.array([[1, -2, 1], [-2, 4, -2], [1, -2, 1]], np.float32)
+    r = cv2.filter2D(gray.astype(np.float32), -1, k)
+    return float(np.abs(r).mean() * np.sqrt(np.pi / 2) / 6.0)
+
+
 def _prepare(gray: np.ndarray) -> np.ndarray:
-    """특징 추출 전처리 — CLAHE 국소 대비 강화.
+    """특징 추출 전처리 — 노이즈 억제 후 CLAHE 국소 대비 강화.
 
     콘크리트 벽면은 표준편차가 10 남짓으로 대비가 매우 낮다. SIFT 기본
     contrastThreshold(0.04)는 이 정도 텍스처를 전부 노이즈로 버려서
@@ -119,7 +143,21 @@ def _prepare(gray: np.ndarray) -> np.ndarray:
 
     국소 대비를 올린 뒤 임계를 낮추면 골재 반점과 표면 얼룩이 특징으로 살아난다.
     이것들이 콘크리트 정합의 유일한 단서다 — 건물 외벽에는 코너가 드물다.
+
+    다만 CLAHE는 신호와 노이즈를 구분하지 않는다. 고 ISO 촬영본에서는 입자
+    노이즈까지 같이 증폭되어, SIFT가 **노이즈 위에 특징점을 세운다**. 그 특징점은
+    프레임마다 다른 자리에 생기므로 대응이 성립하지 않는다. 실측에서 σ=8 노이즈를
+    넣자 8장 중 2장만 정합되었다.
+
+    그래서 노이즈가 실제로 있을 때만 양방향 필터를 먼저 건다. 가우시안이 아니라
+    양방향인 이유는, 가우시안은 정합의 단서인 골재 경계까지 뭉개기 때문이다.
+    깨끗한 사진에는 아무것도 하지 않는다 — 없는 문제를 고치면 있는 신호가 준다.
     """
+    sigma = _noise_sigma(gray)
+    if sigma > NOISE_SIGMA_TRIGGER:
+        gray = cv2.bilateralFilter(
+            gray, d=5, sigmaColor=float(np.clip(sigma * 2.0, 8, 60)), sigmaSpace=4
+        )
     return cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8)).apply(gray)
 
 
@@ -377,12 +415,12 @@ class Stitcher:
                 else range(i + 1, n)
             )
             for j in js:
-                H, inl, tot, err = _match_pair(
+                H, inl, tot, err, xfer = _match_pair(
                     kps[i], descs[i], kps[j], descs[j], matcher
                 )
                 if H is None:
                     continue
-                pm = PairMatch(i, j, H, inl, tot, round(err, 3))
+                pm = PairMatch(i, j, H, inl, tot, round(err, 3), round(xfer, 3))
                 if pm.confidence >= self.min_confidence:
                     pairs.append(pm)
 
@@ -464,7 +502,86 @@ class Stitcher:
                 f"{len(dropped)}장이 정합되지 않았습니다. 중복도가 낮거나 다른 면을 "
                 "찍은 사진일 수 있습니다 — 목록을 확인하십시오."
             )
+
+        # 전달오차가 전반적으로 크면 평면 호모그래피로 설명되지 않는 왜곡이
+        # 있다는 뜻이다. 가장 흔한 원인은 광각 렌즈의 배럴 왜곡이고, 이 정합기는
+        # 그것을 모델링하지 않는다. 조용히 틀린 파노라마를 내주는 것보다
+        # 무엇이 의심되는지 말하는 편이 낫다.
+        # 변환들이 서로 모순되는지 — 쌍 단위 지표가 놓치는 실패를 잡는다
+        inc = cycle_inconsistency(pairs, T_small)
+        result.cycle_error = inc
+        if inc > 8.0:
+            result.warnings.append(
+                f"변환 순환오차 {inc:.0f}px — 사진들의 상대 위치가 서로 모순됩니다. "
+                "평면 호모그래피로 설명되지 않는 왜곡(주로 광각 렌즈의 배럴 왜곡)이 "
+                "있을 때 나타납니다. 렌즈 보정을 거친 사진을 쓰십시오. "
+                "이 파노라마에서 잰 치수는 신뢰할 수 없습니다."
+            )
+        elif inc > 3.0:
+            result.warnings.append(
+                f"변환 순환오차 {inc:.1f}px — 배치가 다소 어긋날 수 있습니다. "
+                "균열폭은 원본 사진에서 재는 편이 안전합니다."
+            )
         return result
+
+
+def cycle_inconsistency(
+    pairs: list[PairMatch], transforms: dict[int, np.ndarray], size: int = 600
+) -> float:
+    """변환들이 서로 모순되지 않는지 — 순환을 돌아 제자리로 오는가.
+
+    왜 이것이 필요한가
+    -------------------
+    쌍 단위 지표(인라이어 비율, 전달오차)로는 렌즈 왜곡을 잡을 수 없다. RANSAC이
+    임계 안의 점만 인라이어로 남기므로, 왜곡이 있어도 **남은 점들의 잔차는 정의상
+    작다**. 실측에서 배럴왜곡 k1=-0.15 인 사진들이 전달오차 2px 미만으로 통과하면서
+    배치는 78px 어긋났다. 쌍마다 조금씩 다른 거짓말을 하는데, 각각은 그럴듯하다.
+
+    모순은 여러 쌍을 이어 붙일 때 드러난다. i→j→k→i 로 돌아오면 원점이어야 하는데,
+    왜곡이 있으면 돌아오지 않는다. 시점 차이(진짜 호모그래피)는 이 검사를 통과한다 —
+    실제로 성립하는 변환이기 때문이다. 그래서 이 지표는 **'모델이 틀린 경우'만**
+    골라낸다. 배율 편차로는 그 구분이 안 된다(시점 20°도 배율 2.5가 나온다).
+
+    신장 트리에 없는 간선마다 기본 순환이 하나씩 생긴다. 각 순환에서 이미지
+    네 귀퉁이가 얼마나 밀리는지 재고, 그 중앙값을 픽셀로 돌려준다.
+    """
+    if not transforms:
+        return 0.0
+    edge = {(p.i, p.j): p.H for p in pairs}
+    nodes = set(transforms)
+    tree: set[tuple[int, int]] = set()
+    seen = {min(nodes)}
+    changed = True
+    while changed:
+        changed = False
+        for (i, j) in edge:
+            if i in nodes and j in nodes and (i in seen) != (j in seen):
+                tree.add((i, j))
+                seen |= {i, j}
+                changed = True
+
+    c = size / 2.0
+    corners = np.float32(
+        [[[-c, -c]], [[c, -c]], [[c, c]], [[-c, c]]]
+    )
+    errs: list[float] = []
+    for (i, j), H in edge.items():
+        if (i, j) in tree or i not in transforms or j not in transforms:
+            continue
+        # 트리를 통한 경로와 이 간선을 통한 경로가 같아야 한다.
+        # T_i · H = T_j  →  T_i⁻¹ · T_j · H⁻¹ = I
+        try:
+            loop = np.linalg.inv(transforms[i]) @ transforms[j] @ np.linalg.inv(H)
+        except np.linalg.LinAlgError:
+            continue
+        loop = loop / loop[2, 2] if abs(loop[2, 2]) > 1e-12 else loop
+        moved = cv2.perspectiveTransform(corners, loop).reshape(-1, 2)
+        errs.append(float(np.linalg.norm(moved - corners.reshape(-1, 2), axis=1).mean()))
+
+    if not errs:
+        return 0.0
+    errs.sort()
+    return round(errs[len(errs) // 2], 2)
 
 
 def map_point(H: np.ndarray, x: float, y: float) -> tuple[float, float]:
