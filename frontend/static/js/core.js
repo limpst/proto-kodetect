@@ -149,6 +149,32 @@ window.addEventListener("hashchange", () =>
   showItem(location.hash.replace("#", "") || "overview")
 );
 
+/** 저장이 휘발성이면 알린다.
+ *
+ * 무료 배포는 DATABASE_URL 없이 뜨면 SQLite 파일을 컨테이너에 만들고, 다음
+ * 배포에서 통째로 사라진다. 사진·그룹·도면·수기 손상이 함께 날아가는데
+ * 화면에는 "데이터가 없습니다"로만 보여 원인을 짚을 수 없다.
+ */
+async function checkPersistence() {
+  const node = el("persistWarn");
+  if (!node) return;
+  try {
+    const h = await api("/healthz");
+    const lost = [];
+    if (h.database_persistent === false) lost.push("점검 기록");
+    if (h.storage_persistent === false) lost.push("업로드 사진");
+    if (!lost.length) return;
+    node.textContent = "임시 저장";
+    node.title =
+      `${lost.join(" · ")}이(가) 재배포·재시작 때 초기화됩니다. ` +
+      `DB=${h.database}, 저장소=${h.storage_dir}. ` +
+      "보존하려면 DATABASE_URL(관리형 Postgres)과 영구 디스크를 지정하십시오.";
+    node.hidden = false;
+  } catch {
+    // 상태를 못 읽는 것 자체로 화면을 막지는 않는다.
+  }
+}
+
 /* ─── 부트 ──────────────────────────────────────────────── */
 async function boot() {
   const me = await api("/api/auth/me");
@@ -163,6 +189,8 @@ async function boot() {
     await fetch("/api/auth/logout", { method: "POST", credentials: "same-origin" });
     location.href = "/login";
   });
+
+  await checkPersistence();
 
   App.buildings = await api("/api/buildings");
   App.members = await api("/api/member-classes");

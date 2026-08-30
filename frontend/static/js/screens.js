@@ -415,6 +415,12 @@ async function scStats() {
 /* #bhc 의 칸반이 '지금 어느 단계에 몇 건 있는가'를 보여준다면, 이 화면은
  * '무엇부터 손대야 하는가'를 한 줄로 세운다. 같은 데이터라도 착수 순서를
  * 정하는 일과 진행 상황을 훑는 일은 다른 화면이 필요하다. */
+// 상태 이름은 bhc.js 의 CAPA_COLUMNS 가 단일 출처다. 여기서 다시 적으면
+// 한쪽만 고쳤을 때 두 화면이 서로 다른 말을 하게 된다.
+const CAPA_STATE_LABEL = Object.fromEntries(
+  (typeof CAPA_COLUMNS === "object" ? CAPA_COLUMNS : []).map(([k, l]) => [k, l])
+);
+
 async function scCapa() {
   const node = scSection("capa");
   let capa;

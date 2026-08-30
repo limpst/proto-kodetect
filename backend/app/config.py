@@ -75,6 +75,27 @@ class Settings(BaseSettings):
             url = "postgresql+psycopg://" + url[len("postgresql://"):]
         return url
 
+    @property
+    def storage_summary(self) -> dict:
+        """어디에 저장되고 있으며 재시작을 견디는가.
+
+        무료 배포에서 DATABASE_URL 을 주지 않으면 SQLite 파일이 컨테이너
+        파일시스템에 생기고, 배포할 때마다 통째로 사라진다. 현장 사진·그룹·
+        도면·수기 손상이 예고 없이 날아가는데도 화면에는 '데이터가 없습니다'
+        로만 보여 원인을 짚을 수 없다. 그래서 상태를 노출한다.
+        """
+        url = self.sqlalchemy_url
+        scheme = url.split("://", 1)[0]
+        is_sqlite = scheme.startswith("sqlite")
+        ephemeral_root = str(self.storage_dir).startswith(("/tmp", "\tmp"))
+        return {
+            "database": "sqlite" if is_sqlite else scheme,
+            # 관리형 Postgres 는 컨테이너와 수명이 분리돼 있다.
+            "database_persistent": not is_sqlite,
+            "storage_dir": str(self.storage_dir),
+            "storage_persistent": not ephemeral_root,
+        }
+
 
 settings = Settings()
 settings.uploads_dir.mkdir(parents=True, exist_ok=True)

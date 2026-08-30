@@ -84,7 +84,12 @@ app.mount(
 
 @app.get("/healthz")
 def healthz() -> dict:
-    return {"ok": True, "app": settings.app_name, "version": settings.version}
+    return {
+        "ok": True,
+        "app": settings.app_name,
+        "version": settings.version,
+        **settings.storage_summary,
+    }
 
 
 @app.get("/login", include_in_schema=False)
