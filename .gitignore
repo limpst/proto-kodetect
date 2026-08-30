@@ -11,6 +11,7 @@ dist/
 .vite/
 
 # Data / runtime
+.verify/
 storage/uploads/*
 storage/overlays/*
 !storage/uploads/.gitkeep

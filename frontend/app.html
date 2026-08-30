@@ -7,8 +7,10 @@
 <link rel="stylesheet" href="/static/css/app.css?v=8e36f6d1" />
 <link rel="stylesheet" href="/static/css/photo.css?v=4610b654" />
 <link rel="stylesheet" href="/static/css/shell.css?v=f9ac3900" />
-<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js"></script>
+<!-- 폐쇄망(On-Premise) 설치가 전제이므로 외부 CDN을 쓰지 않는다.
+     PRO 명세의 1번 강점이 "인터넷 연결 불필요"인데 CDN에 의존하면 그 자리에서 화면이 깨진다. -->
+<script src="/static/vendor/lightweight-charts.standalone.production.js?v=e54f978a"></script>
+<script src="/static/vendor/three.min.js?v=d053bdc0"></script>
 </head>
 <body>
 <div class="app">
