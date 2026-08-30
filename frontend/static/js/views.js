@@ -134,101 +134,7 @@ function renderOverview() {
   );
 }
 
-/* ─── 균열 분석 ─────────────────────────────────────────── */
-function renderDetection(d) {
-  el("dtHint").textContent =
-    `${d.image_size[1]}×${d.image_size[0]}px · ${d.gsd_source}`;
-
-  el("dtImageWrap").className = "";
-  el("dtImageWrap").innerHTML =
-    `<img class="overlay-img" src="${d.overlay_url}?t=${Date.now()}" alt="검출 결과" />`;
-
-  const scaleTxt = d.mm_per_px ? num(d.mm_per_px, 4) : "—";
-  el("dtChips").innerHTML = [
-    chip("검출 균열", `<span class="num">${int(d.crack_count)}</span>`, "건"),
-    chip("픽셀 스케일", `<span class="num">${scaleTxt}</span>`, "mm/px"),
-    chip("선명도", `<span class="num">${num(d.sharpness, 0)}</span>`, "",
-         d.quality_ok ? "" : "warn"),
-    chip("균열 면적률", `<span class="num">${num(d.crack_area_ratio * 100, 3)}</span>`, "%"),
-    chip("점검 종합등급", gradeBadge(d.inspection_grade), ""),
-  ].join("");
-
-  const quality = d.quality_ok
-    ? ""
-    : `<div class="alert">${esc(d.quality_note)}</div>`;
-  el("dtStatus").innerHTML =
-    quality +
-    `<div class="alert info">분석 완료 — 결함 ${d.crack_count}건이 점검 회차에 저장되었고
-     종합 안전등급이 ${String(d.inspection_grade || "-").toUpperCase()} 로 갱신되었습니다.</div>`;
-
-  renderTable(
-    el("dtCracks"),
-    [
-      { h: "#", cls: "num", render: (c) => int(c.index) },
-      { h: "등급", render: (c) => gradeBadge(c.grade) },
-      { h: "폭(mm)", cls: "num", render: (c) => num(c.width_mm_p95, 3) },
-      { h: "최대(mm)", cls: "num", render: (c) => num(c.width_mm_max, 3) },
-      { h: "길이(mm)", cls: "num", render: (c) => num(c.length_mm, 0) },
-      { h: "신뢰도", cls: "num", render: (c) => num(c.confidence, 2) },
-      {
-        h: "조치",
-        render: (c) =>
-          c.repair_required
-            ? '<span class="badge bad">보수 필요</span>'
-            : '<span class="badge mute">경과관찰</span>',
-      },
-    ],
-    d.cracks,
-    "검출된 균열이 없습니다"
-  );
-}
-
-async function runDetect() {
-  const file = el("dtFile").files[0];
-  if (!file) {
-    el("dtStatus").innerHTML =
-      '<div class="alert">사진을 선택하거나 “합성 표본으로 시연”을 눌러주세요.</div>';
-    return;
-  }
-  const fd = new FormData();
-  fd.append("file", file);
-  fd.append("inspection_id", el("dtInsp").value);
-  fd.append("member_code", el("dtMember").value);
-  if (el("dtDist").value) fd.append("distance_m", el("dtDist").value);
-  if (el("dtGsd").value) fd.append("gsd_mm_per_px_in", el("dtGsd").value);
-
-  el("dtStatus").innerHTML = '<div class="alert info"><span class="spin"></span> 분석 중…</div>';
-  try {
-    const d = await api("/api/detect", { method: "POST", body: fd });
-    renderDetection(d);
-    await refreshAfterDetect();
-  } catch (e) {
-    el("dtStatus").innerHTML = `<div class="alert critical">분석 실패: ${esc(e.message)}</div>`;
-  }
-}
-
-async function runDemo() {
-  el("dtStatus").innerHTML =
-    '<div class="alert info"><span class="spin"></span> 합성 표본 생성 및 분석 중…</div>';
-  try {
-    const seed = Math.floor(Math.random() * 100000);
-    const d = await api(
-      `/api/detect/demo?inspection_id=${el("dtInsp").value}` +
-        `&seed=${seed}&member_code=${encodeURIComponent(el("dtMember").value)}`,
-      { method: "POST" }
-    );
-    renderDetection(d);
-    await refreshAfterDetect();
-  } catch (e) {
-    el("dtStatus").innerHTML = `<div class="alert critical">시연 실패: ${esc(e.message)}</div>`;
-  }
-}
-
-async function refreshAfterDetect() {
-  App.inspections = await api(`/api/inspections?building_id=${App.buildingId}`);
-  State.detail = await api(`/api/buildings/${App.buildingId}`);
-  renderOverview();
-}
+/* 진단 화면(영상 분석)은 detect.js 가 전담한다. */
 
 /* ─── 시계열 진행 ───────────────────────────────────────── */
 async function loadProgression() {
@@ -562,6 +468,9 @@ window.onViewShown = function (view) {
     fn().catch((e) => console.error(key, e));
   };
   if (view === "bhc") once("bhc", loadBhc);
+  if (view === "groups") once("groups", loadGroups);
+  if (view === "drawings") once("drawings", loadDrawings);
+  if (view === "deliver") once("deliver", loadDeliver);
   if (view === "progression") once("progression", loadProgression);
   if (view === "live") once("live", loadLive);
   if (view === "view3d") once("view3d", load3D);
@@ -570,7 +479,5 @@ window.onViewShown = function (view) {
 };
 
 document.addEventListener("DOMContentLoaded", () => {
-  el("dtRun")?.addEventListener("click", runDetect);
-  el("dtDemo")?.addEventListener("click", runDemo);
   el("rpOpen")?.addEventListener("click", openReport);
 });

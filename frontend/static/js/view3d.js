@@ -13,8 +13,8 @@ const V3D = {
   angle: { theta: 0.85, phi: 1.05, radius: 5.6 },
 };
 
-const STATUS_COLOR = { normal: 0x22c55e, warn: 0xeab308, critical: 0xef4444 };
-const GRADE_COLOR = {
+const V3D_STATUS_COLOR = { normal: 0x22c55e, warn: 0xeab308, critical: 0xef4444 };
+const V3D_GRADE_COLOR = {
   A: 0x1f6f3f, B: 0x4d7c1a, C: 0x8a6d10, D: 0x9a4a12, E: 0x8f2222,
 };
 
@@ -126,7 +126,7 @@ function v3dBuild(building, memberGrades, channels) {
   for (let i = 0; i < floors; i++) {
     const g = grades.length ? grades[Math.min(i, grades.length - 1)] : "A";
     const mat = new THREE.MeshStandardMaterial({
-      color: GRADE_COLOR[g] ?? 0x334155,
+      color: V3D_GRADE_COLOR[g] ?? 0x334155,
       roughness: 0.78,
       metalness: 0.05,
       transparent: true,
@@ -161,8 +161,8 @@ function v3dBuild(building, memberGrades, channels) {
     const mesh = new THREE.Mesh(
       new THREE.SphereGeometry(0.055, 20, 16),
       new THREE.MeshStandardMaterial({
-        color: STATUS_COLOR[c.status] || 0x22c55e,
-        emissive: STATUS_COLOR[c.status] || 0x22c55e,
+        color: V3D_STATUS_COLOR[c.status] || 0x22c55e,
+        emissive: V3D_STATUS_COLOR[c.status] || 0x22c55e,
         emissiveIntensity: 0.55,
         roughness: 0.35,
       })
@@ -178,7 +178,7 @@ function v3dBuild(building, memberGrades, channels) {
 function v3dUpdate(statuses, stresses) {
   V3D.markers.forEach((mesh, code) => {
     const st = statuses?.[code] || "normal";
-    const color = STATUS_COLOR[st] || 0x22c55e;
+    const color = V3D_STATUS_COLOR[st] || 0x22c55e;
     mesh.material.color.setHex(color);
     mesh.material.emissive.setHex(color);
     const s = 1 + 1.6 * Math.min(1, Math.max(0, stresses?.[`ch:${code}`] ?? 0) * 2.2);

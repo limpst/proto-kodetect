@@ -70,6 +70,23 @@ def _recompute_inspection(db: Session, inspection: Inspection) -> None:
     db.commit()
 
 
+def _analysis_state(result, mm_per_px: float | None) -> tuple[str, str]:
+    """사진의 분석 상태와 안내 문구.
+
+    QuickGuide는 분석 완료 사진에 초록 표시를 붙인다. '정보 부족'은 스케일이
+    없어 mm 환산이 불가능한 상태로, 실패와 구분해야 사용자가 무엇을 해야 할지
+    안다 — 전자는 치수 측정, 후자는 재촬영이다.
+    """
+    if mm_per_px is None:
+        return "needs_scale", (
+            "스케일(GSD)이 없어 균열폭을 mm로 환산하지 못했습니다. "
+            "촬영거리를 입력하거나 치수 측정을 먼저 하십시오."
+        )
+    if not result.quality_ok:
+        return "analyzed", result.quality_note
+    return "analyzed", ""
+
+
 @router.post("", response_model=DetectionOut)
 async def detect_image(
     file: UploadFile = File(...),
@@ -124,9 +141,13 @@ async def detect_image(
     overlay_name = f"{stem}_overlay.jpg"
     render_overlay(image, result.cracks, grades, settings.overlays_dir / overlay_name)
 
+    state, state_note = _analysis_state(result, mm_per_px)
     photo = Photo(
         inspection_id=inspection_id,
         filename=filename,
+        analysis_state=state,
+        analysis_note=state_note,
+        sharpness=result.sharpness,
         overlay_filename=overlay_name,
         width_px=w,
         height_px=h,
@@ -178,6 +199,7 @@ async def detect_image(
             CrackOut(
                 index=i + 1,
                 bbox=list(c.bbox),
+                polyline=[[int(x), int(y)] for x, y in c.polyline],
                 length_px=c.length_px,
                 length_mm=c.length_mm,
                 width_mm_p95=c.width_mm_p95,
@@ -238,9 +260,13 @@ def detect_demo(
     overlay_name = f"{stem}_overlay.jpg"
     render_overlay(image, result.cracks, grades, settings.overlays_dir / overlay_name)
 
+    state, state_note = _analysis_state(result, sample.mm_per_px)
     photo = Photo(
         inspection_id=inspection_id,
         filename=filename,
+        analysis_state=state,
+        analysis_note=state_note,
+        sharpness=result.sharpness,
         overlay_filename=overlay_name,
         width_px=w,
         height_px=h,
@@ -291,6 +317,7 @@ def detect_demo(
             CrackOut(
                 index=i + 1,
                 bbox=list(c.bbox),
+                polyline=[[int(x), int(y)] for x, y in c.polyline],
                 length_px=c.length_px,
                 length_mm=c.length_mm,
                 width_mm_p95=c.width_mm_p95,

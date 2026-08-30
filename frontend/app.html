@@ -4,57 +4,59 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>KO-Detect · 건축물 안전진단 통합 플랫폼</title>
-<link rel="stylesheet" href="/static/css/app.css" />
+<link rel="stylesheet" href="/static/css/app.css?v=8e36f6d1" />
+<link rel="stylesheet" href="/static/css/shell.css?v=c5e4977c" />
 <script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js"></script>
 </head>
 <body>
-<div class="shell">
+<div class="app">
 
-  <!-- ─── 사이드바 ─────────────────────────────────────── -->
-  <aside class="sidebar">
-    <div class="brand">
-      <div class="mark">KO-Detect</div>
-      <div class="sub">건축물 안전진단 통합 플랫폼</div>
+  <!-- ─── 상단: 대분류 ─────────────────────────────────── -->
+  <header class="topbar2">
+    <div class="brand2">
+      <span class="mk">KO-Detect</span>
+      <span class="ko">안전진단 플랫폼</span>
     </div>
 
-    <nav class="nav" id="nav">
-      <div class="group">진단</div>
-      <a href="#overview"    data-view="overview"><span class="ico">▤</span> 개요</a>
-      <a href="#bhc"         data-view="bhc"><span class="ico">🩺</span> 건강검진</a>
-      <a href="#detect"      data-view="detect"><span class="ico">◈</span> 균열 분석</a>
-      <a href="#progression" data-view="progression"><span class="ico">◔</span> 시계열 진행</a>
+    <nav class="groups" id="groupNav"></nav>
 
-      <div class="group">모니터링</div>
-      <a href="#live"  data-view="live"><span class="ico">◉</span> 실시간 계측</a>
-      <a href="#view3d" data-view="view3d"><span class="ico">⬢</span> 3D 뷰</a>
-
-      <div class="group">의사결정</div>
-      <a href="#policy"  data-view="policy"><span class="ico">◆</span> 유지관리 정책</a>
-      <a href="#report"  data-view="report"><span class="ico">▦</span> 판정서</a>
-    </nav>
-
-    <div class="foot">
-      <div id="userLine">—</div>
-      <div style="margin-top:8px"><a href="#" id="logout" style="color:var(--text-dim)">로그아웃</a></div>
-    </div>
-  </aside>
-
-  <!-- ─── 메인 ─────────────────────────────────────────── -->
-  <div class="main">
-    <header class="topbar">
-      <h1 id="viewTitle">개요</h1>
+    <div class="right">
       <select id="buildingSel" title="대상 시설물"></select>
-      <div class="spacer"></div>
-      <div class="chip" style="min-width:132px">
-        <div class="c-l">건전성 지수 (MTM)</div>
-        <div class="c-v num" id="tickHealth">—<small id="tickDelta"></small></div>
+      <div class="ticker" title="점검 결과와 실시간 계측을 결합한 현재 건전성">
+        <div>
+          <div class="tk-l">건전성 MTM</div>
+          <div class="tk-v" id="tickHealth">—<span class="tk-d" id="tickDelta"></span></div>
+        </div>
+        <canvas id="tickSpark" width="76" height="26"></canvas>
+        <span class="grade g-none" id="tickGrade">—</span>
       </div>
-      <span class="grade g-none" id="tickGrade">—</span>
       <div class="live-dot" id="liveDot"><i></i><span>연결 대기</span></div>
-    </header>
+    </div>
+  </header>
 
-    <div class="content">
+  <div class="body2">
+    <!-- ─── 좌측: 기능 ─────────────────────────────────── -->
+    <aside class="subnav">
+      <nav id="subNav"></nav>
+      <div class="foot2">
+        <div id="userLine">—</div>
+        <div style="margin-top:6px">
+          <a href="#" id="logout" style="color:var(--text-dim)">로그아웃</a>
+        </div>
+      </div>
+    </aside>
+
+    <!-- ─── 화면 ───────────────────────────────────────── -->
+    <div class="stage">
+      <div class="stage-head">
+        <div>
+          <h1 id="viewTitle">종합 현황</h1>
+          <div class="desc" id="viewDesc"></div>
+        </div>
+        <div class="acts" id="viewActs"></div>
+      </div>
+
 
       <!-- ── 개요 ── -->
       <section class="view active" id="view-overview">
@@ -158,12 +160,24 @@
         </div>
       </section>
 
-      <!-- ── 균열 분석 ── -->
+            <!-- ── 진단 · 영상 분석 ── -->
       <section class="view" id="view-detect">
-        <div class="row">
+
+        <div class="steps" id="dtSteps"></div>
+
+        <div class="row wide-right">
+          <!-- 입력 -->
           <div class="card">
-            <h2>영상 분석 <span class="hint">드론/현장 사진 업로드 또는 합성 표본으로 즉시 시연</span></h2>
-            <div class="field-row">
+            <h2>분석 입력 <span class="hint">사진을 끌어다 놓거나 클릭해 선택</span></h2>
+
+            <div class="dropzone" id="dtDrop">
+              <div class="dz-ico">⬓</div>
+              <div class="dz-t">사진을 여기에 놓으십시오</div>
+              <div class="dz-s">JPG · PNG · WebP · 최대 20MB</div>
+            </div>
+            <input id="dtFile" type="file" accept="image/*" hidden />
+
+            <div class="field-row" style="margin-top:12px">
               <div class="field">
                 <label for="dtInsp">점검 회차</label>
                 <select id="dtInsp"></select>
@@ -172,35 +186,222 @@
                 <label for="dtMember">부재</label>
                 <select id="dtMember"></select>
               </div>
+            </div>
+
+            <h2 style="margin-top:16px">스케일 (GSD)
+              <span class="hint">픽셀을 mm로 바꾸는 기준</span></h2>
+            <div class="field-row">
               <div class="field">
                 <label for="dtDist">촬영거리 (m)</label>
                 <input id="dtDist" type="number" step="0.1" placeholder="예: 8.0" />
               </div>
               <div class="field">
-                <label for="dtGsd">GSD 직접입력 (mm/px)</label>
-                <input id="dtGsd" type="number" step="0.001" placeholder="비우면 거리로 산정" />
+                <label for="dtGsd">직접 입력 (mm/px)</label>
+                <input id="dtGsd" type="number" step="0.001" placeholder="거리로 산정" />
               </div>
-              <div class="field">
-                <label for="dtFile">사진</label>
-                <input id="dtFile" type="file" accept="image/*" />
-              </div>
-              <button class="primary" id="dtRun">분석 실행</button>
-              <button id="dtDemo">합성 표본으로 시연</button>
             </div>
-            <div id="dtStatus"></div>
+            <div class="note" id="dtScaleNote">
+              스케일이 없으면 균열폭을 mm로 환산할 수 없어 등급 판정이 성립하지 않습니다.
+            </div>
+
+            <h2 style="margin-top:16px">검출 감도
+              <span class="hint" id="dtSensVal">1.0</span></h2>
+            <div class="field-row">
+              <input id="dtSens" type="range" min="0.5" max="3" step="0.1" value="1" />
+              <span class="note" style="flex:1;min-width:170px">
+                높이면 미세 균열까지 잡지만 오검출이 늘어납니다.
+              </span>
+            </div>
+
+            <div class="field-row" style="margin-top:14px">
+              <button class="primary" id="dtRun">분석 실행</button>
+              <button id="dtDemo">합성 표본 시연</button>
+              <button class="ghost" id="dtReset">초기화</button>
+            </div>
+
+            <div id="dtStatus" style="margin-top:10px"></div>
+          </div>
+
+          <!-- 결과 뷰어 -->
+          <div class="card">
+            <h2>검출 결과 <span class="hint" id="dtHint">분석을 실행하면 표시됩니다</span></h2>
+
+            <div class="field-row" style="margin-bottom:10px">
+              <button class="ghost" id="dtModeCompare">원본 비교</button>
+              <button class="ghost" id="dtModeMarks">중심선 표시</button>
+              <button class="ghost" id="dtModeOverlay">서버 오버레이</button>
+              <span class="note" style="margin-left:auto" id="dtViewNote"></span>
+            </div>
+
+            <div id="dtViewer" class="empty">분석 결과가 여기에 표시됩니다</div>
           </div>
         </div>
-        <div class="row wide-left">
+
+        <div class="row c3">
           <div class="card">
-            <h2>검출 결과 <span class="hint" id="dtHint"></span></h2>
-            <div id="dtImageWrap" class="empty">분석을 실행하면 결과 영상이 표시됩니다</div>
+            <h2>촬영 품질 <span class="hint">측정 신뢰도의 전제</span></h2>
+            <div id="dtQuality"></div>
           </div>
           <div class="card">
-            <h2>측정 요약</h2>
-            <div class="chips" id="dtChips"></div>
-            <div style="margin-top:14px" class="table-wrap table-scroll">
-              <table id="dtCracks"></table>
+            <h2>등급 분포 <span class="hint">검출된 균열의 상태등급</span></h2>
+            <div id="dtGrades"></div>
+          </div>
+          <div class="card">
+            <h2>균열폭 분포 <span class="hint">mm</span></h2>
+            <div id="dtHist"></div>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="card">
+            <h2>균열 상세
+              <span class="hint">행을 클릭하면 영상에서 해당 균열이 강조됩니다</span></h2>
+            <div class="field-row" style="margin-bottom:8px">
+              <button class="ghost" id="dtCsv">CSV 내보내기</button>
+              <span class="note" id="dtSelNote" style="margin-left:auto"></span>
             </div>
+            <div class="table-wrap table-scroll"><table id="dtCracks"></table></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" id="view-groups">
+        <div class="row">
+          <div class="card">
+            <h2>사진 그룹 <span class="hint">부재·위치 단위로 묶으면 보고서가 그룹별로 정리됩니다</span></h2>
+            <div class="field-row">
+              <div class="field">
+                <label for="grInsp">점검 회차</label>
+                <select id="grInsp"></select>
+              </div>
+              <div class="field">
+                <label for="grName">새 그룹 이름</label>
+                <input id="grName" type="text" placeholder="예: P1-3F기둥" />
+              </div>
+              <div class="field">
+                <label for="grMember">부재</label>
+                <select id="grMember"></select>
+              </div>
+              <button class="primary" id="grCreate">그룹 만들기</button>
+              <button id="grDemo">합성 표본 3장 분석</button>
+            </div>
+            <div id="grStatus"></div>
+          </div>
+        </div>
+
+        <div class="row wide-right">
+          <div class="card">
+            <h2>그룹 목록 <span class="hint">클릭하면 사진이 표시됩니다</span></h2>
+            <div id="grList"></div>
+          </div>
+          <div class="card">
+            <h2>사진 <span class="hint" id="grPhotoHint">그룹을 선택하십시오</span></h2>
+            <div class="field-row" id="grMoveBar" style="display:none">
+              <div class="field">
+                <label for="grMoveTo">선택 사진을 옮길 그룹</label>
+                <select id="grMoveTo"></select>
+              </div>
+              <button class="primary" id="grMove">이동</button>
+              <span class="note" id="grSelCount">선택 0장</span>
+            </div>
+            <div class="photo-grid" id="grPhotos">
+              <div class="empty">그룹을 선택하면 사진이 표시됩니다</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── 도면 · 위치 (STEP 04) ── -->
+      <section class="view" id="view-drawings">
+        <div class="row">
+          <div class="card">
+            <h2>도면 <span class="hint">PDF · DXF · JPG · PNG 또는 빈 화면으로 시작</span></h2>
+            <div class="field-row">
+              <div class="field">
+                <label for="dwName">도면 이름</label>
+                <input id="dwName" type="text" placeholder="예: 3층 평면도" />
+              </div>
+              <div class="field">
+                <label for="dwFile">도면 파일 (선택)</label>
+                <input id="dwFile" type="file" accept=".pdf,.dxf,.jpg,.jpeg,.png" />
+              </div>
+              <button class="primary" id="dwCreate">도면 추가</button>
+            </div>
+            <div id="dwStatus"></div>
+            <div class="table-wrap" style="margin-top:12px"><table id="dwTable"></table></div>
+          </div>
+        </div>
+
+        <div class="row wide-left">
+          <div class="card">
+            <h2>도면 작업 <span class="hint" id="dwCanvasHint">도면을 선택한 뒤 캔버스를 클릭해 위치를 찍습니다</span></h2>
+            <div class="field-row">
+              <div class="field">
+                <label for="spGroup">연결할 사진 그룹</label>
+                <select id="spGroup"></select>
+              </div>
+              <div class="field">
+                <label for="spMember">부재</label>
+                <select id="spMember"></select>
+              </div>
+              <div class="field">
+                <label for="spDir">방향</label>
+                <select id="spDir">
+                  <option value="">—</option>
+                  <option>동측</option><option>서측</option>
+                  <option>남측</option><option>북측</option>
+                </select>
+              </div>
+              <button class="primary" id="spArm">+ 위치 만들기</button>
+            </div>
+            <div class="dwg-wrap" id="dwCanvasWrap">
+              <div class="empty">도면을 선택하십시오</div>
+            </div>
+          </div>
+          <div class="card">
+            <h2>위치 목록</h2>
+            <div class="table-wrap table-scroll"><table id="spTable"></table></div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── 보고서 출력 (STEP 05) ── -->
+      <section class="view" id="view-deliver">
+        <div class="row wide-left">
+          <div class="card">
+            <h2>보고서 범위 <span class="hint">시설물·도면 기준 또는 사진 그룹 기준</span></h2>
+            <div class="field-row">
+              <div class="field">
+                <label for="dlInsp">점검 회차</label>
+                <select id="dlInsp"></select>
+              </div>
+              <div class="field">
+                <label for="dlScope">범위</label>
+                <select id="dlScope">
+                  <option value="drawing">시설물·도면 기준</option>
+                  <option value="group">사진 그룹 기준</option>
+                </select>
+              </div>
+            </div>
+            <div id="dlScopeList"></div>
+
+            <h2 style="margin-top:20px">결과 파일 <span class="hint">최소 1개</span></h2>
+            <div class="chips" id="dlKinds">
+              <label class="chip pick"><input type="checkbox" value="photo_sheet" checked />
+                <div><div class="c-l">사진대지</div><div class="c-v">Word</div></div></label>
+              <label class="chip pick"><input type="checkbox" value="quantity" checked />
+                <div><div class="c-l">손상물량표</div><div class="c-v">Excel</div></div></label>
+              <label class="chip pick"><input type="checkbox" value="survey_dxf" checked />
+                <div><div class="c-l">외관조사망도</div><div class="c-v">DXF</div></div></label>
+            </div>
+            <div class="field-row" style="margin-top:14px">
+              <button class="primary" id="dlBuild">보고서 다운로드</button>
+            </div>
+            <div id="dlStatus"></div>
+          </div>
+          <div class="card">
+            <h2>미리보기 <span class="hint">무엇이 담기는지 먼저 확인</span></h2>
+            <div id="dlPreview"><div class="empty">점검 회차를 선택하십시오</div></div>
           </div>
         </div>
       </section>
@@ -344,10 +545,14 @@
   </div>
 </div>
 
-<script src="/static/js/core.js"></script>
-<script src="/static/js/charts.js"></script>
-<script src="/static/js/view3d.js"></script>
-<script src="/static/js/bhc.js"></script>
-<script src="/static/js/views.js"></script>
+<script src="/static/js/core.js?v=f6bfe799"></script>
+<script src="/static/js/nav.js?v=50b703de"></script>
+<script src="/static/js/charts.js?v=6470ba93"></script>
+<script src="/static/js/view3d.js?v=1c3a3dc1"></script>
+<script src="/static/js/bhc.js?v=e285d88f"></script>
+<script src="/static/js/workspace.js?v=b27a2d91"></script>
+<script src="/static/js/detect.js?v=5ee095e5"></script>
+<script src="/static/js/views.js?v=79ed0971"></script>
+
 </body>
 </html>

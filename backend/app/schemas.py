@@ -115,6 +115,9 @@ class DetectionOptions(BaseModel):
 class CrackOut(BaseModel):
     index: int
     bbox: list[int]
+    # 중심선 좌표 — 프론트가 원본 위에 균열 형상을 직접 그린다.
+    # 서버 오버레이 이미지만으로는 확대·선택·하이라이트가 불가능하다.
+    polyline: list[list[int]] = Field(default_factory=list)
     length_px: float
     length_mm: float | None
     width_mm_p95: float | None

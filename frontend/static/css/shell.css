@@ -1,0 +1,221 @@
+/* ============================================================
+   KO-Detect 셸 & 진단 화면 컴포넌트
+   app.css(디자인 토큰·기본 요소) 위에 얹는다.
+
+   2단 내비게이션을 쓰는 이유
+   ---------------------------
+   기능이 수십 개가 되면 좌측 한 줄로는 스캔이 어렵다. 상단에서 맥락
+   (대분류)을 고르고 좌측에서 기능을 고르면, 어떤 기능에도 2번 안에
+   닿는다. 상단은 "지금 무슨 일을 하는가", 좌측은 "그 안에서 무엇을".
+   ============================================================ */
+
+.app { display: flex; flex-direction: column; height: 100vh; }
+
+/* ─── 상단 바 ─────────────────────────────────────────────── */
+.topbar2 {
+  display: flex; align-items: center; gap: 18px;
+  height: 54px; flex: 0 0 54px; padding: 0 18px;
+  background: var(--panel); border-bottom: 1px solid var(--line);
+}
+.brand2 { display: flex; align-items: baseline; gap: 9px; white-space: nowrap; }
+.brand2 .mk {
+  font-size: 16px; font-weight: 800; letter-spacing: -0.02em;
+  background: linear-gradient(135deg, #38bdf8 0%, #2f81f7 100%);
+  -webkit-background-clip: text; background-clip: text; color: transparent;
+}
+.brand2 .ko { font-size: 11px; color: var(--text-mute); }
+
+.groups { display: flex; gap: 2px; height: 100%; align-items: stretch; overflow-x: auto; }
+.groups::-webkit-scrollbar { height: 0; }
+.groups a {
+  display: flex; align-items: center; gap: 7px; padding: 0 13px;
+  color: var(--text-dim); text-decoration: none; font-size: 13px;
+  border-bottom: 2px solid transparent; white-space: nowrap;
+  transition: color .12s, border-color .12s;
+}
+.groups a:hover { color: var(--text); }
+.groups a.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 650; }
+.groups a .gi { font-size: 13px; opacity: .9; }
+
+.topbar2 .right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+
+/* 상단 티커 — 건전성 지수를 어느 화면에서든 계속 노출한다 */
+.ticker {
+  display: flex; align-items: center; gap: 11px;
+  padding: 5px 12px; border-radius: var(--radius-sm);
+  background: var(--panel-2); border: 1px solid var(--line-soft);
+}
+.ticker .tk-l { font-size: 10px; color: var(--text-dim); line-height: 1.25; }
+.ticker .tk-v {
+  font-size: 17px; font-weight: 700; letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums; color: var(--num); line-height: 1.15;
+}
+.ticker .tk-d { font-size: 11px; font-variant-numeric: tabular-nums; }
+.ticker .tk-d.up { color: var(--ok); }
+.ticker .tk-d.dn { color: var(--bad); }
+.ticker canvas { display: block; }
+
+/* ─── 본문 = 좌측 서브내비 + 화면 ─────────────────────────── */
+.body2 { display: grid; grid-template-columns: 212px 1fr; flex: 1; min-height: 0; }
+
+.subnav {
+  background: var(--panel); border-right: 1px solid var(--line);
+  overflow-y: auto; padding: 10px 10px 24px;
+}
+.subnav .sec {
+  font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--text-mute); padding: 12px 8px 6px;
+}
+.subnav a {
+  display: flex; align-items: center; gap: 9px; padding: 8px 10px;
+  border-radius: var(--radius-sm); color: var(--text-dim);
+  text-decoration: none; font-size: 12.5px; margin-bottom: 1px;
+  transition: background .12s, color .12s;
+}
+.subnav a:hover { background: var(--panel-2); color: var(--text); }
+.subnav a.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+.subnav a .si { width: 16px; text-align: center; font-size: 12px; opacity: .85; }
+.subnav a .tag {
+  margin-left: auto; font-size: 9.5px; padding: 1px 5px; border-radius: 7px;
+  background: var(--elev); color: var(--text-mute); letter-spacing: .02em;
+}
+.subnav a .tag.f { background: rgba(56, 189, 248, .14); color: #7dd3fc; }
+.subnav .foot2 {
+  margin-top: 16px; padding: 12px 10px 0; border-top: 1px solid var(--line-soft);
+  font-size: 11px; color: var(--text-mute);
+}
+
+.stage { overflow-y: auto; padding: 16px 20px 46px; min-width: 0; }
+
+/* 화면 헤더 */
+.stage-head {
+  display: flex; align-items: flex-start; gap: 14px; margin-bottom: 16px;
+  padding-bottom: 12px; border-bottom: 1px solid var(--line-soft);
+}
+.stage-head h1 { font-size: 17px; font-weight: 680; margin: 0; letter-spacing: -0.01em; }
+.stage-head .desc { font-size: 12px; color: var(--text-mute); margin-top: 3px; max-width: 720px; }
+.stage-head .acts { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+
+@media (max-width: 1100px) {
+  .body2 { grid-template-columns: 172px 1fr; }
+  .groups a { padding: 0 10px; font-size: 12px; }
+}
+
+/* ============================================================
+   진단 · 영상 분석 전용 컴포넌트
+   ============================================================ */
+
+/* 처리 단계 — 어디까지 갔고 어디서 멈췄는지 즉시 보이게 한다 */
+.steps { display: flex; flex-wrap: wrap; margin-bottom: 14px; }
+.step {
+  display: flex; align-items: center; gap: 8px; padding: 8px 15px 8px 12px;
+  background: var(--panel-2); border: 1px solid var(--line-soft);
+  font-size: 11.5px; color: var(--text-mute);
+}
+.step:first-child { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
+.step:last-child { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+.step + .step { border-left: none; }
+.step .n {
+  width: 18px; height: 18px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--elev); color: var(--text-mute); font-size: 10px; font-weight: 700;
+}
+.step.done { color: var(--text); border-color: rgba(34, 197, 94, .3); }
+.step.done .n { background: var(--ok); color: #06210f; }
+.step.active { color: var(--accent); border-color: rgba(56, 189, 248, .4); background: var(--accent-soft); }
+.step.active .n { background: var(--accent); color: #06121f; }
+.step.fail { color: var(--crit); border-color: rgba(239, 68, 68, .4); }
+.step.fail .n { background: var(--crit); color: #2a0707; }
+
+/* 드래그 & 드롭 업로드 */
+.dropzone {
+  border: 1.5px dashed #33405c; border-radius: var(--radius);
+  padding: 24px 18px; text-align: center; cursor: pointer;
+  background: var(--panel-2); transition: border-color .14s, background .14s;
+}
+.dropzone:hover, .dropzone.over { border-color: var(--accent); background: var(--accent-soft); }
+.dropzone .dz-ico { font-size: 25px; opacity: .5; }
+.dropzone .dz-t { font-size: 13px; margin-top: 8px; color: var(--text); }
+.dropzone .dz-s { font-size: 11px; color: var(--text-mute); margin-top: 4px; }
+.dropzone.has { padding: 13px; text-align: left; }
+.dz-file { display: flex; align-items: center; gap: 12px; }
+.dz-file img {
+  width: 60px; height: 60px; object-fit: cover; border-radius: var(--radius-sm);
+  border: 1px solid var(--line); flex: 0 0 auto;
+}
+.dz-file .meta { min-width: 0; }
+.dz-file .nm {
+  font-size: 12.5px; color: var(--text); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+.dz-file .sz { font-size: 11px; color: var(--text-mute); font-variant-numeric: tabular-nums; }
+
+/* 원본 ↔ 검출 비교 슬라이더 */
+.compare {
+  position: relative; width: 100%; overflow: hidden; user-select: none;
+  border-radius: var(--radius-sm); border: 1px solid var(--line);
+  background: #05070b; touch-action: none;
+}
+.compare img { display: block; width: 100%; }
+.compare .after { position: absolute; inset: 0; overflow: hidden; }
+.compare .after img { position: absolute; top: 0; left: 0; width: 100%; }
+.compare .handle {
+  position: absolute; top: 0; bottom: 0; width: 2px;
+  background: var(--accent); cursor: ew-resize; box-shadow: 0 0 0 1px rgba(0, 0, 0, .55);
+}
+.compare .handle::after {
+  content: "◀ ▶"; position: absolute; top: 50%; left: 50%;
+  transform: translate(-50%, -50%); font-size: 9px;
+  background: var(--accent); color: #06121f; border-radius: 10px;
+  padding: 3px 7px; white-space: nowrap; font-weight: 700;
+}
+.compare .lbl {
+  position: absolute; top: 8px; font-size: 10px; padding: 2px 8px;
+  border-radius: 4px; background: rgba(5, 7, 11, .74); color: var(--text-dim);
+}
+.compare .lbl.l { left: 8px; }
+.compare .lbl.r { right: 8px; }
+
+/* 균열 하이라이트 — 원본 위에 겹치는 SVG */
+.shot { position: relative; line-height: 0; }
+.shot img { width: 100%; display: block; border-radius: var(--radius-sm); }
+.shot svg.marks { position: absolute; inset: 0; width: 100%; height: 100%; }
+.shot svg.marks .cr {
+  fill: none; stroke-width: 2.2; opacity: .8; cursor: pointer;
+  transition: opacity .12s, stroke-width .12s;
+}
+.shot svg.marks .cr.dim { opacity: .14; }
+.shot svg.marks .cr.hot { opacity: 1; stroke-width: 4; }
+.shot svg.marks .bx { fill: none; stroke-width: 1.4; stroke-dasharray: 5 3; opacity: 0; }
+.shot svg.marks .bx.hot { opacity: .95; }
+
+/* 측정 게이지 — 허용균열폭 대비 현재 폭 */
+.gauge { display: grid; gap: 5px; }
+.gauge .g-top { display: flex; align-items: baseline; gap: 6px; }
+.gauge .g-v { font-size: 20px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--num); }
+.gauge .g-u { font-size: 11px; color: var(--text-dim); }
+.gauge .g-lim { margin-left: auto; font-size: 11px; color: var(--text-mute); font-variant-numeric: tabular-nums; }
+.gauge .g-bar { height: 8px; border-radius: 4px; background: var(--elev); position: relative; overflow: visible; }
+.gauge .g-bar > i { display: block; height: 100%; border-radius: 4px; }
+.gauge .g-bar .mark { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--crit); }
+
+/* 등급 분포 스택바 */
+.stack { display: flex; height: 22px; border-radius: 5px; overflow: hidden; background: var(--elev); }
+.stack > i {
+  display: flex; align-items: center; justify-content: center;
+  font-size: 10px; font-weight: 700; color: #08121c;
+  font-variant-numeric: tabular-nums; min-width: 0;
+}
+.stack-lg { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; font-size: 11px; color: var(--text-dim); }
+.stack-lg i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; }
+
+/* 폭 히스토그램 */
+.hist { display: flex; align-items: flex-end; gap: 3px; height: 82px; }
+.hist .b { flex: 1; background: var(--accent); border-radius: 2px 2px 0 0; min-height: 2px; opacity: .85; }
+.hist-x { display: flex; gap: 3px; margin-top: 5px; }
+.hist-x span { flex: 1; text-align: center; font-size: 9.5px; color: var(--text-mute); font-variant-numeric: tabular-nums; }
+
+/* 결과 행 상호작용 */
+tr[data-crack] { cursor: pointer; }
+tr.pick { background: rgba(56, 189, 248, .11) !important; }
+
+input[type="range"] { width: 148px; accent-color: var(--accent); }

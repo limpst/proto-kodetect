@@ -402,3 +402,97 @@ td.nowrap { white-space: nowrap; }
 .op-tag.obs { background: #7dd3fc; }
 .op-tag.itp { background: #a78bfa; }
 .op-tag.rec { background: #fbbf24; }
+
+/* ============================================================
+   제품 워크플로우 — 사진그룹 · 도면 · 보고서
+   ============================================================ */
+
+/* ─── 사진 그룹 카드 ──────────────────────────────────────── */
+.grp-card {
+  background: var(--panel-2); border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm); padding: 10px 12px; margin-bottom: 8px;
+  cursor: pointer; transition: border-color .12s, background .12s;
+}
+.grp-card:hover { border-color: var(--line); background: var(--elev); }
+.grp-card.active { border-color: var(--accent); background: var(--accent-soft); }
+.grp-card.un { border-style: dashed; }
+.grp-top { display: flex; align-items: center; gap: 8px; }
+.grp-top b { font-size: 13px; }
+.grp-del {
+  margin-left: auto; padding: 0 7px; font-size: 14px; line-height: 1.4;
+  background: transparent; border-color: transparent; color: var(--text-mute);
+}
+.grp-del:hover { background: rgba(239,68,68,.14); color: #f87171; border-color: transparent; }
+.grp-nums { display: flex; gap: 14px; margin-top: 6px; font-size: 11px; color: var(--text-dim); }
+.grp-nums b { color: #fff; }
+
+/* ─── 사진 그리드 ─────────────────────────────────────────── */
+.photo-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: 10px; max-height: 520px; overflow-y: auto;
+}
+.ph-card {
+  background: var(--panel-2); border: 2px solid var(--line-soft);
+  border-radius: var(--radius-sm); overflow: hidden; cursor: pointer;
+  transition: border-color .12s;
+}
+.ph-card:hover { border-color: var(--line); }
+.ph-card.sel { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(56,189,248,.2); }
+.ph-card img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; }
+.ph-meta {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 6px; padding: 6px 8px 2px; font-size: 10.5px;
+}
+.ph-name {
+  padding: 0 8px 2px; font-size: 10px; color: var(--text-dim);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ph-gsd { padding: 0 8px 7px; font-size: 10px; color: var(--text-mute); }
+.ph-gsd.warn-t { color: var(--warn); }
+
+/* ─── 도면 캔버스 ─────────────────────────────────────────── */
+.dwg-wrap { margin-top: 12px; }
+.dwg-canvas {
+  position: relative; width: 100%; background: #0d1420 center/cover no-repeat;
+  border: 1px solid var(--line); border-radius: var(--radius-sm);
+  background-image:
+    linear-gradient(rgba(56,189,248,.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(56,189,248,.05) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+.dwg-canvas.armed { cursor: crosshair; border-color: var(--accent); }
+.dwg-blank {
+  position: absolute; inset: 0; display: grid; place-items: center;
+  color: var(--text-mute); font-size: 12px; pointer-events: none; text-align: center;
+}
+.pin {
+  position: absolute; transform: translate(-50%, -50%);
+  display: flex; align-items: center; gap: 6px; pointer-events: none;
+}
+.pin i {
+  width: 24px; height: 24px; border-radius: 50%; background: var(--accent);
+  color: #06121f; font-style: normal; font-weight: 800; font-size: 12px;
+  display: grid; place-items: center;
+  box-shadow: 0 0 0 3px rgba(56,189,248,.25);
+  font-variant-numeric: tabular-nums;
+}
+.pin span {
+  background: rgba(11,14,20,.88); border: 1px solid var(--line);
+  border-radius: 4px; padding: 2px 7px; font-size: 10.5px; white-space: nowrap;
+}
+
+/* ─── 보고서 선택 ─────────────────────────────────────────── */
+.chip.pick { cursor: pointer; display: flex; align-items: center; gap: 9px; }
+.chip.pick input { accent-color: var(--accent); width: 15px; height: 15px; }
+.chip.pick:has(input:checked) {
+  border-color: var(--accent); background: var(--accent-soft);
+}
+.pick-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 11px; margin-bottom: 6px;
+  background: var(--panel-2); border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm); cursor: pointer; font-size: 12.5px;
+}
+.pick-row:has(input:checked) { border-color: var(--accent); }
+.pick-row input { accent-color: var(--accent); }
+.pick-row .num { margin-left: auto; color: var(--text-dim); font-size: 11px; }

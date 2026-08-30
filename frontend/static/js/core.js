@@ -115,35 +115,9 @@ function chip(label, value, unit = "", tone = "") {
 }
 
 /* ─── 라우팅 ────────────────────────────────────────────── */
-const VIEW_TITLES = {
-  overview: "개요",
-  bhc: "건강검진 (BHC-STD-2026)",
-  detect: "균열 분석",
-  progression: "시계열 진행",
-  live: "실시간 계측",
-  view3d: "3D 뷰",
-  policy: "유지관리 정책",
-  report: "판정서",
-};
-
-function sectionOf(view) {
-  return view === "view3d" ? el("view3d-section") : el("view-" + view);
-}
-
-function showView(view) {
-  if (!VIEW_TITLES[view]) view = "overview";
-  App.view = view;
-  document.querySelectorAll(".view").forEach((s) => s.classList.remove("active"));
-  sectionOf(view)?.classList.add("active");
-  document
-    .querySelectorAll("#nav a")
-    .forEach((a) => a.classList.toggle("active", a.dataset.view === view));
-  el("viewTitle").textContent = VIEW_TITLES[view];
-  if (window.onViewShown) window.onViewShown(view);
-}
-
+/* ─── 라우팅 — 실제 구조는 nav.js 가 갖는다 ────────────── */
 window.addEventListener("hashchange", () =>
-  showView(location.hash.replace("#", "") || "overview")
+  showItem(location.hash.replace("#", "") || "overview")
 );
 
 /* ─── 부트 ──────────────────────────────────────────────── */
@@ -173,7 +147,7 @@ async function boot() {
   if (App.buildings.length) {
     await selectBuilding(App.buildings[0].id);
   }
-  showView(location.hash.replace("#", "") || "overview");
+  showItem(location.hash.replace("#", "") || "overview");
 }
 
 document.addEventListener("DOMContentLoaded", () => {
