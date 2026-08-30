@@ -469,6 +469,8 @@ function pvRender() {
 }
 
 function pvBind() {
+  pvBindUpload();
+  el("pvAnalyze")?.addEventListener("click", pvAnalyze);
   el("pvReload")?.addEventListener("click", () => pvLoad().catch(console.error));
   el("pvState")?.addEventListener("change", pvRender);
   el("pvInsp")?.addEventListener("change", () => pvLoad().catch(console.error));
@@ -477,3 +479,124 @@ function pvBind() {
 }
 
 document.addEventListener("DOMContentLoaded", pvBind);
+
+/* ═══ 사진 일괄 등록 · AI 일괄 분석 ═══════════════════════
+ * QuickGuide STEP 03. 등록과 분석을 나눈 이유는 batch.py 주석에 적어 두었다.
+ * 진행 표시줄은 "멈춘 것인지 도는 것인지"를 사용자가 알 수 있게 하는 장치다 —
+ * 남은 시간(ETA)까지 보여야 기다릴지 그만둘지 판단할 수 있다.
+ */
+const BATCH = { jobId: null, timer: null };
+
+function pvBindUpload() {
+  const dz = el("pvDrop");
+  const input = el("pvFiles");
+  if (!dz || !input) return;
+
+  dz.addEventListener("click", () => input.click());
+  input.addEventListener("change", () => pvUpload([...input.files]));
+  ["dragenter", "dragover"].forEach((ev) =>
+    dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.add("over"); })
+  );
+  ["dragleave", "drop"].forEach((ev) =>
+    dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.remove("over"); })
+  );
+  dz.addEventListener("drop", (e) => {
+    const fs = [...(e.dataTransfer?.files || [])].filter((f) => f.type.startsWith("image/"));
+    if (fs.length) pvUpload(fs);
+  });
+}
+
+async function pvUpload(files) {
+  if (!files.length) return;
+  const inspId = el("pvInsp").value;
+  if (!inspId) return;
+
+  const fd = new FormData();
+  files.forEach((f) => fd.append("files", f));
+  fd.append("inspection_id", inspId);
+  fd.append("member_code", "slab");
+
+  el("pvUploadNote").innerHTML =
+    `<div class="alert info"><span class="spin"></span> ${files.length}장 등록 중…</div>`;
+  try {
+    const out = await api("/api/photos/upload", { method: "POST", body: fd });
+    const rejected = out.rejected.length
+      ? `<div class="note" style="margin-top:6px">반려 ${out.skipped}장 — ` +
+        out.rejected.map((r) => `${esc(r.filename)}(${esc(r.reason)})`).join(", ") +
+        "</div>"
+      : "";
+    el("pvUploadNote").innerHTML =
+      `<div class="alert info">${out.added}장 등록 완료 — 분석 대기 상태입니다.
+       그룹을 나눈 뒤 <b>AI 분석하기</b>를 누르십시오.${rejected}</div>`;
+    await pvLoad();
+  } catch (e) {
+    el("pvUploadNote").innerHTML =
+      `<div class="alert critical">등록 실패: ${esc(e.message)}</div>`;
+  }
+}
+
+async function pvAnalyze() {
+  const inspId = el("pvInsp").value;
+  if (!inspId || BATCH.timer) return;
+  try {
+    const job = await api("/api/detect/batch", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ inspection_id: Number(inspId), sensitivity: 1.0 }),
+    });
+    BATCH.jobId = job.job_id;
+    el("pvAnalyze").disabled = true;
+    pvRenderProgress(job);
+    BATCH.timer = setInterval(pvPollBatch, 1000);
+  } catch (e) {
+    el("pvProgress").innerHTML = `<div class="alert">${esc(e.message)}</div>`;
+  }
+}
+
+async function pvPollBatch() {
+  try {
+    const st = await api(`/api/detect/batch/${BATCH.jobId}`);
+    pvRenderProgress(st);
+    if (st.state !== "running") {
+      clearInterval(BATCH.timer);
+      BATCH.timer = null;
+      el("pvAnalyze").disabled = false;
+      await pvLoad();
+    }
+  } catch (e) {
+    clearInterval(BATCH.timer);
+    BATCH.timer = null;
+    el("pvAnalyze").disabled = false;
+  }
+}
+
+function pvRenderProgress(st) {
+  const pct = st.total ? (st.done / st.total) * 100 : 0;
+  const eta =
+    st.state === "running" && st.eta_sec != null
+      ? ` · 남은 시간 약 <b class="num">${num(st.eta_sec, 0)}</b>초`
+      : "";
+  const done = st.state === "finished";
+  el("pvProgress").innerHTML = `
+    <div class="card" style="margin-bottom:12px;background:var(--panel-2)">
+      <div class="field-row" style="margin-bottom:8px">
+        <b style="font-size:13px">${done ? "AI 분석 완료" : "AI 분석 중"}</b>
+        <span class="num" style="font-size:15px">${st.done} / ${st.total}</span>
+        <span class="note">검출 <b class="num">${st.detected}</b>건${
+          st.failed ? ` · 실패 <b class="num" style="color:var(--crit)">${st.failed}</b>건` : ""
+        }${eta}</span>
+        ${st.current ? `<span class="note" style="margin-left:auto">${esc(st.current)}</span>` : ""}
+      </div>
+      <div class="bar"><i style="width:${pct.toFixed(1)}%;background:${
+        done ? "var(--ok)" : "var(--accent)"
+      }"></i></div>
+      ${
+        done
+          ? `<div class="note" style="margin-top:8px">소요 <b class="num">${num(
+              st.elapsed_sec, 1
+            )}</b>초. 스케일이 없는 사진은 '정보 부족'으로 남습니다 —
+             사진을 열어 <b>치수 측정</b>을 하면 폭이 mm로 산출됩니다.</div>`
+          : ""
+      }
+    </div>`;
+}

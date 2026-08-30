@@ -271,6 +271,14 @@
         <div class="row">
           <div class="card">
             <h2>사진 목록 <span class="hint" id="pvHint"></span></h2>
+            <div class="dropzone" id="pvDrop" style="margin-bottom:12px">
+              <div class="dz-ico">⬓</div>
+              <div class="dz-t">현장 사진을 여기에 놓으십시오 (여러 장 가능)</div>
+              <div class="dz-s">등록만 하고 분석은 하지 않습니다 — 그룹을 나눈 뒤 [AI 분석하기]</div>
+            </div>
+            <input id="pvFiles" type="file" accept="image/*" multiple hidden />
+            <div id="pvUploadNote"></div>
+
             <div class="field-row">
               <div class="field">
                 <label for="pvInsp">점검 회차</label>
@@ -286,11 +294,13 @@
                   <option value="failed">실패</option>
                 </select>
               </div>
+              <button class="primary" id="pvAnalyze">AI 분석하기</button>
               <button class="ghost" id="pvReload">새로고침</button>
               <span class="note" style="margin-left:auto">
                 사진을 클릭하면 치수 측정 · 원근 보정 · 손상 그리기 화면이 열립니다.
               </span>
             </div>
+            <div id="pvProgress"></div>
             <div class="photo-grid" id="pvGrid"></div>
           </div>
         </div>
@@ -640,7 +650,7 @@
 <script src="/static/js/workspace.js?v=b27a2d91"></script>
 <script src="/static/js/detect.js?v=ac54a53f"></script>
 <script src="/static/js/stitch.js?v=394dcc89"></script>
-    <script src="/static/js/photo.js?v=68fd16e8"></script>
+    <script src="/static/js/photo.js?v=a9de53bf"></script>
 <script src="/static/js/views.js?v=ef369289"></script>
 
 </body>
