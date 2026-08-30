@@ -12,6 +12,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import Response
@@ -608,13 +609,23 @@ def build_report(body: ReportRequest, db: Session = Depends(get_db)) -> Response
     data, made = build_bundle_zip(bundle, kinds)
 
     stamp = insp.inspected_at.strftime("%Y%m%d")
-    safe = "".join(c for c in b.name if c.isalnum() or c in "_-") or "report"
+
+    # HTTP 헤더는 latin-1만 담을 수 있다. 한글 시설물명을 그대로 넣으면
+    # 응답 생성 단계에서 서버가 죽는다. ASCII 대체명과 RFC 5987 filename*을
+    # 함께 보내, 최신 브라우저는 한글 이름으로 저장하고 구형은 대체명을 쓴다.
+    korean = f"KO-Detect_{b.name}_{stamp}.zip"
+    ascii_fallback = f"KO-Detect_{b.id}_{stamp}.zip"
+    disposition = (
+        f'attachment; filename="{ascii_fallback}"; '
+        f"filename*=UTF-8''{quote(korean)}"
+    )
     return Response(
         content=data,
         media_type="application/zip",
         headers={
-            "Content-Disposition": f'attachment; filename="KO-Detect_{safe}_{stamp}.zip"',
-            "X-Report-Files": ", ".join(made),
+            "Content-Disposition": disposition,
+            # 파일 목록도 한글이므로 URL 인코딩해 보낸다
+            "X-Report-Files": quote(", ".join(made)),
             "X-Report-Defects": str(len(rows)),
         },
     )

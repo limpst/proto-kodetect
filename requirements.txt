@@ -12,3 +12,8 @@ opencv-python-headless>=4.10
 pillow>=11
 httpx>=0.27
 psycopg[binary]>=3.2
+
+# 보고서 산출물 — 손상물량표(Excel) · 사진대지(Word) · 외관조사망도(DXF)
+openpyxl>=3.1
+python-docx>=1.1
+ezdxf>=1.3
