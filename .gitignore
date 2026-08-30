@@ -31,3 +31,6 @@ models/
 docs/server.log
 docs/rl_train.log
 docs/bench/sample_checkup_report.html
+
+# 사내 참고문서 — 저장소가 공개이므로 커밋하지 않는다
+PDF/*.pdf

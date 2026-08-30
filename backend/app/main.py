@@ -19,6 +19,7 @@ from .routers import detect as detect_router
 from .routers import live as live_router
 from .routers import policy as policy_router
 from .routers import reports as reports_router
+from .routers import workspace as workspace_router
 
 ROOT = Path(__file__).resolve().parents[2]
 FRONTEND = ROOT / "frontend"
@@ -60,6 +61,7 @@ app.include_router(detect_router.router)
 app.include_router(live_router.router)
 app.include_router(policy_router.router)
 app.include_router(reports_router.router)
+app.include_router(workspace_router.router)
 
 app.mount("/static", StaticFiles(directory=FRONTEND / "static"), name="static")
 app.mount(
