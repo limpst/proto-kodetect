@@ -120,7 +120,12 @@ NAV.forEach((g) =>
 
 function navSectionOf(viewKey) {
   if (viewKey === "view3d") return document.getElementById("view3d-section");
-  return document.getElementById("view-" + viewKey);
+  const existing = document.getElementById("view-" + viewKey);
+  if (existing) return existing;
+  // screens.js 가 담당하는 화면은 섹션을 미리 만들어 둔다. 안 만들면
+  // showItem 이 '설계 단계' 안내로 빠져 실제로 있는 기능이 없어 보인다.
+  if (typeof SCREENS === "object" && SCREENS[viewKey]) return scSection(viewKey);
+  return null;
 }
 
 function renderGroupNav(activeGroup) {

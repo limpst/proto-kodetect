@@ -194,3 +194,26 @@ def _rationale(action: int, expected_grade: float) -> str:
             else "심각 열화 — 긴급 보강 대상"
         )
     return "회복 불가 수준 — 교체가 생애주기 비용 측면에서 유리"
+
+
+@router.get("/benchmark")
+def benchmark() -> dict:
+    """검출기 벤치마크 결과 — 합성 정답과 대조한 최신 기록.
+
+    성능을 화면에 띄우는 이유는 자랑이 아니라 **해석의 전제**를 주기 위함이다.
+    재현율 0.7 인 검출기의 결과를 보면서 "AI가 다 찾았겠지"라고 생각하면
+    안 되기 때문이다.
+    """
+    path = ROOT / "docs" / "benchmark_baseline.json"
+    if not path.exists():
+        return {
+            "available": False,
+            "message": "벤치마크 기록이 없습니다. `python -m datagen.evaluate` 로 생성하십시오.",
+        }
+    data = json.loads(path.read_text(encoding="utf-8"))
+    data["available"] = True
+    data["caveat"] = (
+        "합성 표본 기준입니다. 실촬영 분포와 다를 수 있으므로 현장 데이터로 "
+        "재측정해야 합니다. 정밀도가 낮으므로 사람 검수가 전제입니다."
+    )
+    return data
