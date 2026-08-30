@@ -59,7 +59,23 @@
       </div>
 
 
-      <!-- ── 개요 ── -->
+            <!-- ── 프로젝트 (STEP 01·02) ── -->
+      <section class="view" id="view-projects">
+        <div class="row">
+          <div class="card">
+            <h2>프로젝트 목록 <span class="hint" id="pjCount"></span></h2>
+            <div class="field-row">
+              <button class="primary" id="pjNew">+ 새 프로젝트</button>
+              <span class="note" style="margin-left:auto">
+                프로젝트를 만들면 시설물과 첫 점검 회차가 함께 생성됩니다.
+              </span>
+            </div>
+            <div class="pj-grid" id="pjGrid"></div>
+          </div>
+        </div>
+      </section>
+
+<!-- ── 개요 ── -->
       <section class="view active" id="view-overview">
         <div class="row">
           <div class="card">
@@ -651,6 +667,7 @@
 <script src="/static/js/detect.js?v=ac54a53f"></script>
 <script src="/static/js/stitch.js?v=394dcc89"></script>
     <script src="/static/js/photo.js?v=a9de53bf"></script>
+<script src="/static/js/projects.js?v=6ebd4fd8"></script>
 <script src="/static/js/views.js?v=ef369289"></script>
 
 </body>

@@ -38,3 +38,8 @@ def init_db() -> None:
     from . import models  # noqa: F401  -- 테이블 등록
 
     Base.metadata.create_all(bind=engine)
+
+    # 기존 테이블에 새 컬럼이 생긴 경우를 메운다. create_all 은 이걸 못 한다.
+    from .migrate import sync_columns
+
+    sync_columns()

@@ -20,6 +20,7 @@ from .routers import detect as detect_router
 from .routers import live as live_router
 from .routers import photo_ops as photo_ops_router
 from .routers import policy as policy_router
+from .routers import projects as projects_router
 from .routers import reports as reports_router
 from .routers import stitch as stitch_router
 from .routers import workspace as workspace_router
@@ -65,6 +66,7 @@ app.include_router(detect_router.router)
 app.include_router(live_router.router)
 app.include_router(photo_ops_router.router)
 app.include_router(policy_router.router)
+app.include_router(projects_router.router)
 app.include_router(reports_router.router)
 app.include_router(stitch_router.router)
 app.include_router(workspace_router.router)

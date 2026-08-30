@@ -23,12 +23,42 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+class Project(Base):
+    """점검 프로젝트 — QuickGuide STEP 01·02.
+
+    시설물 위에 한 겹을 더 두는 이유는 실무 단위가 "프로젝트"이기 때문이다.
+    한 번의 발주에 여러 동을 점검하는 일이 흔하고, 산출물도 프로젝트 단위로
+    묶여 나간다.
+
+    `save_dir` 는 데스크톱 제품에서 결과가 저장될 폴더다. 웹에서는 브라우저
+    다운로드 폴더로 내려가므로 실제 경로 역할은 하지 않고, 산출물 파일명
+    접두사와 발주 구분 라벨로만 쓴다. 없는 기능을 있는 척하지 않기 위해
+    화면에도 그렇게 적는다.
+    """
+
+    __tablename__ = "projects"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    name: Mapped[str] = mapped_column(String(200), index=True)
+    save_dir: Mapped[str] = mapped_column(String(400), default="")
+    # 건축물 / 교량 / 터널 / 옹벽 / 댐 / 항만 / 기타
+    facility_type: Mapped[str] = mapped_column(String(30), default="건축물")
+    client: Mapped[str] = mapped_column(String(160), default="")
+    note: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_now)
+
+    buildings: Mapped[list["Building"]] = relationship(back_populates="project")
+
+
 class Building(Base):
     """진단 대상 건축물/시설물."""
 
     __tablename__ = "buildings"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int | None] = mapped_column(
+        ForeignKey("projects.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     name: Mapped[str] = mapped_column(String(200), index=True)
     address: Mapped[str] = mapped_column(String(400), default="")
     # 시특법 시설물 종별 — 1종 / 2종 / 3종 / 기타
@@ -55,6 +85,7 @@ class Building(Base):
     drawings: Mapped[list["Drawing"]] = relationship(
         back_populates="building", cascade="all, delete-orphan"
     )
+    project: Mapped["Project | None"] = relationship(back_populates="buildings")
 
 
 class Inspection(Base):
