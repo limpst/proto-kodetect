@@ -48,6 +48,8 @@ const NAV = [
     items: [
       { key: "groups", label: "사진 그룹", icon: "▩", view: "groups",
         desc: "부재·위치 단위로 사진을 묶습니다. 보고서와 도면 배치의 기본 단위입니다." },
+      { key: "stitch", label: "이미지 자동 정합", icon: "⧉", view: "stitch",
+        desc: "한 면을 나눠 찍은 사진을 한 장으로 합쳐 겹친 영역의 중복 계상을 없앱니다." },
       { key: "drawings", label: "도면 · 위치", icon: "◫", view: "drawings",
         desc: "외관조사망도에 점검 위치 핀을 배치합니다. 도면 없이 시작할 수 있습니다." },
       { key: "inspections", label: "점검 회차", icon: "◷", view: "inspections",

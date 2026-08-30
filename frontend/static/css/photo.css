@@ -1,0 +1,92 @@
+/* 사진 상세 모달 — 치수 측정 · 원근 보정 · 손상 그리기 */
+
+.modal {
+  position: fixed; inset: 0; z-index: 60; display: none;
+  background: rgba(4, 6, 10, .72); backdrop-filter: blur(3px);
+  padding: 26px;
+}
+.modal.open { display: grid; place-items: center; }
+
+.modal-box {
+  width: min(1400px, 96vw); height: min(920px, 92vh);
+  background: var(--panel); border: 1px solid var(--line);
+  border-radius: var(--radius); box-shadow: var(--shadow);
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.modal-head {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 16px; border-bottom: 1px solid var(--line);
+  flex: 0 0 auto;
+}
+.modal-head h2 {
+  margin: 0; font-size: 14px; font-weight: 650; letter-spacing: -0.01em;
+  text-transform: none; color: var(--text);
+}
+.modal-acts { margin-left: auto; display: flex; gap: 8px; }
+
+.modal-body {
+  display: grid; grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 16px; padding: 16px; overflow: hidden; flex: 1;
+}
+.ph-left { display: flex; flex-direction: column; overflow-y: auto; min-width: 0; }
+.ph-right { overflow-y: auto; border-left: 1px solid var(--line-soft); padding-left: 16px; }
+
+.ph-tools { display: flex; gap: 6px; flex-wrap: wrap; }
+.ph-canvas { background: #05070b; border-radius: var(--radius-sm); overflow: hidden; }
+
+/* 사용자가 찍는 점 — 원본 좌표계 위에 그린다 */
+.shot svg.marks .pk {
+  fill: #38bdf8; stroke: #04121f; stroke-width: 1.5; opacity: .95;
+}
+.shot svg.marks .pkt { fill: #7dd3fc; font-weight: 700; }
+.shot svg.marks .pkline {
+  stroke: #38bdf8; stroke-width: 2.4; fill: none; stroke-dasharray: 8 5;
+}
+.shot svg.marks .pkpoly {
+  stroke: #38bdf8; stroke-width: 2.4; fill: rgba(56, 189, 248, .12);
+  stroke-dasharray: 8 5;
+}
+
+@media (max-width: 1150px) {
+  .modal-body { grid-template-columns: minmax(0, 1fr); }
+  .ph-right { border-left: none; padding-left: 0; border-top: 1px solid var(--line-soft); padding-top: 14px; }
+}
+
+/* ─── 검출 결과 브라우저 (사진 격자) ───────────────────── */
+.photo-grid {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(178px, 1fr));
+  gap: 12px;
+}
+.photo-card {
+  background: var(--panel-2); border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm); overflow: hidden; cursor: pointer;
+  transition: border-color .12s, transform .08s;
+}
+.photo-card:hover { border-color: var(--accent); transform: translateY(-1px); }
+.photo-card .thumb {
+  width: 100%; aspect-ratio: 4 / 3; object-fit: cover; display: block;
+  background: #05070b;
+}
+.photo-card .pc-body { padding: 8px 10px 10px; }
+.photo-card .pc-top {
+  display: flex; align-items: center; gap: 6px; margin-bottom: 4px;
+}
+.photo-card .pc-id {
+  font-size: 11px; color: var(--text-mute); font-variant-numeric: tabular-nums;
+}
+.photo-card .pc-n {
+  margin-left: auto; font-size: 11px; color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+.photo-card .pc-note {
+  font-size: 10.5px; color: var(--text-mute); overflow: hidden;
+  text-overflow: ellipsis; white-space: nowrap;
+}
+/* 분석 완료 표시 — QuickGuide 의 '초록색 분석 완료 표시' */
+.photo-card .dot {
+  width: 8px; height: 8px; border-radius: 50%; flex: 0 0 auto;
+}
+.photo-card .dot.analyzed { background: var(--ok); }
+.photo-card .dot.needs_scale { background: var(--warn); }
+.photo-card .dot.pending { background: var(--text-mute); }
+.photo-card .dot.failed { background: var(--crit); }

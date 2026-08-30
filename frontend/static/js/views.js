@@ -469,6 +469,7 @@ window.onViewShown = function (view) {
   };
   if (view === "bhc") once("bhc", loadBhc);
   if (view === "groups") once("groups", loadGroups);
+  if (view === "stitch") once("stitch", loadStitch);
   if (view === "drawings") once("drawings", loadDrawings);
   if (view === "deliver") once("deliver", loadDeliver);
   if (view === "progression") once("progression", loadProgression);

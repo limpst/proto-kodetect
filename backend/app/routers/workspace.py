@@ -29,6 +29,11 @@ from ..services.deliverables import (
     ReportBundle,
     build_bundle_zip,
 )
+from ..services.photo_ops import (
+    analysis_readiness,
+    rectify_perspective,
+    scale_from_two_points,
+)
 
 router = APIRouter(prefix="/api", tags=["workspace"])
 
@@ -84,6 +89,26 @@ class ManualDefectIn(BaseModel):
     polyline: list[list[float]] = []      # [[x, y], ...] 픽셀 좌표
     width_mm: float | None = None
     note: str = ""
+
+
+class MeasureIn(BaseModel):
+    """치수 측정 — 스케일 동반 컷의 눈금 두 점으로 GSD를 역산한다."""
+
+    photo_id: int
+    p1: list[float]                # [x, y] 픽셀
+    p2: list[float]
+    real_length_mm: float
+    reanalyze: bool = True
+
+
+class RectifyIn(BaseModel):
+    """4점 원근 보정. 실제 치수를 함께 주면 GSD까지 확정된다."""
+
+    photo_id: int
+    points: list[list[float]]      # 4개의 [x, y]
+    real_width_mm: float | None = None
+    real_height_mm: float | None = None
+    reanalyze: bool = True
 
 
 class ReportRequest(BaseModel):
@@ -686,3 +711,189 @@ def preview_report(
             if not drawings else []
         ),
     }
+
+
+# ─── 치수 측정 · 사진 보정 (테스트계획서 p.5) ──────────────────
+def _reanalyze(db: Session, photo: Photo, image, mm_per_px: float | None) -> dict:
+    """사진을 다시 분석한다. **직접 입력한 손상은 보존한다.**
+
+    제품 문서는 "재분석하면 직접 고친 손상은 사라진다"고 경고한다. 그 동작은
+    사용자가 현장에서 확인해 넣은 정보를 자동화가 지우는 것이라 옳지 않다.
+    여기서는 source='ai' 인 결함만 지우고 manual 은 남긴다.
+    """
+    import cv2
+
+    from ..domain import Environment
+    from ..grading import assess_defect
+    from ..services.vision import CrackDetector, render_overlay
+    from .detect import _recompute_inspection
+
+    insp = db.get(Inspection, photo.inspection_id)
+    b = db.get(Building, insp.building_id) if insp else None
+    env = Environment(b.environment) if b else Environment.HUMID
+
+    removed = 0
+    kept = 0
+    for d in db.scalars(select(Defect).where(Defect.photo_id == photo.id)).all():
+        if d.source == "ai":
+            db.delete(d)
+            removed += 1
+        else:
+            kept += 1
+    db.flush()
+
+    result = CrackDetector().detect(image, mm_per_px)
+    assessments = [
+        assess_defect(DefectType.CRACK, width_mm=c.width_mm_p95, environment=env)
+        for c in result.cracks
+    ]
+
+    overlay_name = f"{uuid.uuid4().hex}_overlay.jpg"
+    render_overlay(
+        image, result.cracks, [a.grade.value for a in assessments],
+        settings.overlays_dir / overlay_name,
+    )
+    photo.overlay_filename = overlay_name
+    photo.sharpness = result.sharpness
+
+    for c, a in zip(result.cracks, assessments):
+        db.add(
+            Defect(
+                inspection_id=photo.inspection_id,
+                photo_id=photo.id,
+                defect_type=DefectType.CRACK.value,
+                member_code=photo.member_code,
+                width_mm=c.width_mm_p95,
+                length_mm=c.length_mm,
+                grade=a.grade.value,
+                severity=a.severity,
+                repair_required=a.repair_required,
+                confidence=c.confidence,
+                basis=a.basis,
+                bbox=",".join(str(v) for v in c.bbox),
+                polyline=";".join(f"{x},{y}" for x, y in c.polyline),
+                source="ai",
+            )
+        )
+
+    state, note = analysis_readiness(mm_per_px, result.sharpness)
+    photo.analysis_state = state
+    photo.analysis_note = note
+    db.commit()
+    _recompute_inspection(db, insp)
+
+    return {
+        "crack_count": len(result.cracks),
+        "ai_defects_replaced": removed,
+        "manual_defects_kept": kept,
+        "overlay_url": f"/media/overlays/{overlay_name}",
+        "analysis_state": state,
+        "analysis_note": note,
+        "inspection_grade": insp.safety_grade if insp else None,
+    }
+
+
+@router.post("/photos/measure")
+def measure_scale(body: MeasureIn, db: Session = Depends(get_db)) -> dict:
+    """치수 측정으로 GSD를 확정하고, 원하면 즉시 재분석한다.
+
+    '정보 부족' 사진을 살리는 정규 경로다. 현장에서 크랙스케일·줄자를 결함
+    옆에 대고 찍은 컷의 눈금 두 점을 찍으면 된다.
+    """
+    import cv2
+
+    photo = db.get(Photo, body.photo_id)
+    if not photo:
+        raise HTTPException(404, "사진을 찾을 수 없습니다")
+    if len(body.p1) != 2 or len(body.p2) != 2:
+        raise HTTPException(400, "p1·p2는 [x, y] 형식이어야 합니다")
+
+    try:
+        scale = scale_from_two_points(
+            (body.p1[0], body.p1[1]), (body.p2[0], body.p2[1]), body.real_length_mm
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+    photo.gsd_mm_per_px = scale.mm_per_px
+    db.commit()
+
+    out = {
+        "photo_id": photo.id,
+        "mm_per_px": scale.mm_per_px,
+        "pixel_distance": scale.pixel_distance,
+        "relative_precision": scale.relative_precision,
+        "note": scale.note,
+    }
+
+    if body.reanalyze:
+        src = settings.uploads_dir / (photo.rectified_filename or photo.filename)
+        image = cv2.imread(str(src))
+        if image is None:
+            raise HTTPException(500, "원본 사진을 읽지 못했습니다")
+        out["reanalysis"] = _reanalyze(db, photo, image, scale.mm_per_px)
+    return out
+
+
+@router.post("/photos/rectify")
+def rectify_photo(body: RectifyIn, db: Session = Depends(get_db)) -> dict:
+    """4점 원근 보정 후 보정본을 저장하고, 원하면 즉시 재분석한다."""
+    import cv2
+
+    photo = db.get(Photo, body.photo_id)
+    if not photo:
+        raise HTTPException(404, "사진을 찾을 수 없습니다")
+    if len(body.points) != 4 or any(len(p) != 2 for p in body.points):
+        raise HTTPException(400, "points 는 4개의 [x, y] 여야 합니다")
+
+    image = cv2.imread(str(settings.uploads_dir / photo.filename))
+    if image is None:
+        raise HTTPException(500, "원본 사진을 읽지 못했습니다")
+
+    try:
+        res = rectify_perspective(
+            image,
+            [(p[0], p[1]) for p in body.points],
+            real_width_mm=body.real_width_mm,
+            real_height_mm=body.real_height_mm,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+    name = f"rect_{uuid.uuid4().hex}.jpg"
+    cv2.imwrite(str(settings.uploads_dir / name), res.image)
+
+    # 원본은 지우지 않는다 — 보정이 잘못됐을 때 되돌릴 수 있어야 한다.
+    photo.rectified_filename = name
+    photo.width_px, photo.height_px = res.width, res.height
+    if res.mm_per_px:
+        photo.gsd_mm_per_px = res.mm_per_px
+    db.commit()
+
+    out = {
+        "photo_id": photo.id,
+        "rectified_url": f"/media/uploads/{name}",
+        "size": [res.width, res.height],
+        "tilt_deg": res.tilt_deg,
+        "mm_per_px": res.mm_per_px,
+        "note": res.note,
+        "original_preserved": True,
+    }
+    if body.reanalyze:
+        out["reanalysis"] = _reanalyze(db, photo, res.image, photo.gsd_mm_per_px)
+    return out
+
+
+@router.post("/photos/{photo_id}/reanalyze")
+def reanalyze_photo(photo_id: int, db: Session = Depends(get_db)) -> dict:
+    """다시 사진 분석하기 — 직접 입력 손상은 보존된다."""
+    import cv2
+
+    photo = db.get(Photo, photo_id)
+    if not photo:
+        raise HTTPException(404, "사진을 찾을 수 없습니다")
+    src = settings.uploads_dir / (photo.rectified_filename or photo.filename)
+    image = cv2.imread(str(src))
+    if image is None:
+        raise HTTPException(500, "사진을 읽지 못했습니다")
+    return _reanalyze(db, photo, image, photo.gsd_mm_per_px)
