@@ -284,6 +284,22 @@ async function loadDrawings() {
   if (!el("spMember").options.length) {
     el("spMember").innerHTML = memberOptions("column");
   }
+  // 사진 그룹 화면을 거치지 않고 바로 들어오면 WS.groups 가 비어 있어
+  // 핀에 연결할 그룹을 고를 수 없다. 여기서 한 번 채운다.
+  if (!WS.groups.length) {
+    if (WS.inspectionId == null) {
+      const first = App.inspections && App.inspections[0];
+      if (first) WS.inspectionId = first.id;
+    }
+    if (WS.inspectionId != null) {
+      try {
+        WS.groups = await api(`/api/groups?inspection_id=${WS.inspectionId}`);
+      } catch (e) {
+        console.error("그룹 목록을 불러오지 못했습니다", e);
+      }
+    }
+  }
+
   WS.drawings = await api(`/api/drawings?building_id=${App.buildingId}`);
   fillGroupSelects();
 
@@ -373,6 +389,14 @@ function renderSpotDetail() {
   el("spdY").value = Math.round(s.y);
   const mm = mmText(d, s.x, s.y);
   el("spdMm").textContent = mm ? `실치수 ${mm}` : "축척이 설정되지 않아 실치수를 낼 수 없습니다";
+
+  // 그룹 선택지는 상단 '연결할 사진 그룹' 과 같은 목록을 쓴다
+  const src = el("spGroup");
+  const sel = el("spdGroup");
+  if (src && sel) {
+    sel.innerHTML = src.innerHTML;
+    sel.value = s.group_id == null ? "" : String(s.group_id);
+  }
 }
 
 /** 좌표를 서버에 반영. 드래그와 수치 입력이 같은 경로를 쓴다. */
@@ -401,7 +425,12 @@ function renderCanvas() {
 
   el("dwCanvasHint").textContent =
     `${d.name} · ${w}×${h}px` +
+    (d.mm_per_px ? ` · ${num(d.mm_per_px, 2)} mm/px` : " · 축척 미설정") +
     (WS.armed ? " · 캔버스를 클릭해 위치를 찍으십시오" : "");
+
+  // 축척 입력란에 현재값을 채워 둔다 — 비어 있으면 '설정된 적 없음'과 구분이 안 된다
+  const se = el("dwScaleEdit");
+  if (se) se.value = d.mm_per_px ? d.mm_per_px : "";
 
   el("dwCanvasWrap").innerHTML = `
     <div class="dwg-canvas${WS.armed ? " armed" : ""}" id="dwCanvas"
@@ -704,6 +733,47 @@ document.addEventListener("DOMContentLoaded", () => {
   el("dwZoomIn")?.addEventListener("click", () => applyZoom(WS.zoom * 1.5));
   el("dwZoomOut")?.addEventListener("click", () => applyZoom(WS.zoom / 1.5));
   el("dwZoomFit")?.addEventListener("click", () => applyZoom(1));
+
+  // 축척 사후 수정 — 핀 좌표는 원본 px 라 축척을 바꿔도 위치는 그대로다
+  el("dwScaleSave")?.addEventListener("click", async () => {
+    const d = WS.activeDrawing;
+    if (!d) return;
+    const mm = parseFloat(el("dwScaleEdit").value);
+    if (!Number.isFinite(mm) || mm <= 0) {
+      el("dwStatus").innerHTML = '<div class="alert">축척은 0보다 큰 값이어야 합니다.</div>';
+      return;
+    }
+    try {
+      await api(`/api/drawings/${d.id}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ mm_per_px: mm }),
+      });
+      el("dwStatus").innerHTML =
+        `<div class="alert info">축척을 ${num(mm, 2)} mm/px 로 저장했습니다. 실치수가 갱신됩니다.</div>`;
+      await loadDrawings();
+      await openDrawing(d.id);
+    } catch (e) {
+      el("dwStatus").innerHTML = `<div class="alert critical">축척 저장 실패: ${esc(e.message)}</div>`;
+    }
+  });
+
+  // 핀의 사진 그룹 재지정
+  el("spdGroupApply")?.addEventListener("click", async () => {
+    if (WS.activeSpot === null) return;
+    const v = el("spdGroup").value;
+    try {
+      await api(`/api/spots/${WS.activeSpot}`, {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ group_id: v === "" ? null : Number(v) }),
+      });
+      await openDrawing(WS.activeDrawing.id);
+      await loadDrawings();
+    } catch (e) {
+      el("dwStatus").innerHTML = `<div class="alert critical">그룹 적용 실패: ${esc(e.message)}</div>`;
+    }
+  });
 
   // 선택한 핀의 좌표를 수치로 보정
   el("spdApply")?.addEventListener("click", async () => {

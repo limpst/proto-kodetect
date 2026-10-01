@@ -56,6 +56,13 @@ class DrawingIn(BaseModel):
     mm_per_px: float | None = None
 
 
+class DrawingUpdateIn(BaseModel):
+    """도면 메타 수정. 축척은 현장에서 나중에 알게 되는 경우가 흔하다."""
+
+    name: str | None = None
+    mm_per_px: float | None = None
+
+
 class SpotIn(BaseModel):
     drawing_id: int
     x: float
@@ -326,6 +333,30 @@ async def create_drawing(
     db.refresh(d)
     return {"id": d.id, "name": d.name, "file_kind": d.file_kind,
             "size": [d.width_px, d.height_px]}
+
+
+@router.patch("/drawings/{drawing_id}")
+def update_drawing(
+    drawing_id: int, body: DrawingUpdateIn, db: Session = Depends(get_db)
+) -> dict:
+    """도면 이름·축척 수정.
+
+    축척은 등록 시점에 모르는 경우가 많다. 현장에서 실측 길이를 확인한 뒤
+    넣을 수 있어야, 이미 찍어 둔 핀의 좌표를 그대로 두고 실치수만 살릴 수 있다.
+    핀 좌표는 도면 원본 px 로 저장되므로 축척을 바꿔도 위치는 흔들리지 않는다.
+    """
+    d = db.get(Drawing, drawing_id)
+    if not d:
+        raise HTTPException(404, "도면을 찾을 수 없습니다")
+
+    patch = body.model_dump(exclude_none=True)
+    if "mm_per_px" in patch and patch["mm_per_px"] <= 0:
+        raise HTTPException(400, "축척은 0보다 커야 합니다")
+    for k, v in patch.items():
+        setattr(d, k, v)
+    db.commit()
+    db.refresh(d)
+    return {"id": d.id, "name": d.name, "mm_per_px": d.mm_per_px}
 
 
 @router.get("/drawings/{drawing_id}/spots")
