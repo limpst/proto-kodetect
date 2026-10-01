@@ -443,6 +443,10 @@
                 <label for="dwFile">도면 파일 (선택)</label>
                 <input id="dwFile" type="file" accept=".pdf,.dxf,.jpg,.jpeg,.png" />
               </div>
+              <div class="field">
+                <label for="dwMm">축척 (mm/px, 선택)</label>
+                <input id="dwMm" type="number" step="0.01" min="0" placeholder="예: 12.5" />
+              </div>
               <button class="primary" id="dwCreate">도면 추가</button>
             </div>
             <div id="dwStatus"></div>
@@ -472,12 +476,49 @@
               </div>
               <button class="primary" id="spArm">+ 위치 만들기</button>
             </div>
+
+            <!-- 도면 위치정보 표시줄 — 커서 좌표와 축척 환산을 실시간으로 보여준다 -->
+            <div class="dwg-bar">
+              <div class="dwg-zoom">
+                <button id="dwZoomOut" title="축소">−</button>
+                <span id="dwZoomLabel" class="num">100%</span>
+                <button id="dwZoomIn" title="확대">+</button>
+                <button id="dwZoomFit" title="화면에 맞춤">맞춤</button>
+              </div>
+              <div class="dwg-readout" id="dwReadout">
+                <span class="ro-k">커서</span><span class="ro-v num" id="roPx">—</span>
+                <span class="ro-k">실치수</span><span class="ro-v num" id="roMm">축척 미설정</span>
+              </div>
+            </div>
+
             <div class="dwg-wrap" id="dwCanvasWrap">
               <div class="empty">도면을 선택하십시오</div>
             </div>
           </div>
           <div class="card">
-            <h2>위치 목록</h2>
+            <h2>위치 목록 <span class="hint" id="spHint">핀을 끌어 옮기거나 좌표를 직접 입력할 수 있습니다</span></h2>
+
+            <!-- 선택한 핀의 정밀 조정 — 클릭만으로는 맞추기 어려운 좌표를 수치로 보정한다 -->
+            <div id="spDetail" class="sp-detail" hidden>
+              <div class="sp-detail-head">
+                <span class="sp-no" id="spdNo">#</span>
+                <span id="spdName">—</span>
+                <button id="spdClose" title="선택 해제">✕</button>
+              </div>
+              <div class="field-row tight">
+                <div class="field">
+                  <label for="spdX">X (px)</label>
+                  <input id="spdX" type="number" step="1" min="0" />
+                </div>
+                <div class="field">
+                  <label for="spdY">Y (px)</label>
+                  <input id="spdY" type="number" step="1" min="0" />
+                </div>
+                <button class="primary" id="spdApply">좌표 적용</button>
+              </div>
+              <div class="sp-detail-mm num" id="spdMm"></div>
+            </div>
+
             <div class="table-wrap table-scroll"><table id="spTable"></table></div>
           </div>
         </div>

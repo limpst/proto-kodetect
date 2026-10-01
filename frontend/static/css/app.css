@@ -480,6 +480,50 @@ td.nowrap { white-space: nowrap; }
   background: rgba(11,14,20,.88); border: 1px solid var(--line);
   border-radius: 4px; padding: 2px 7px; font-size: 10.5px; white-space: nowrap;
 }
+/* 핀은 끌어서 옮길 수 있어야 하므로 포인터 이벤트를 되살린다 */
+.pin i { pointer-events: auto; cursor: grab; }
+.pin.active i {
+  background: var(--ok, #34d399); color: #06121f;
+  box-shadow: 0 0 0 3px rgba(52,211,153,.35);
+}
+.pin.dragging i { cursor: grabbing; box-shadow: 0 0 0 5px rgba(56,189,248,.35); }
+
+/* 도면 위치정보 표시줄 */
+.dwg-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 12px; margin-top: 10px; flex-wrap: wrap;
+}
+.dwg-zoom { display: flex; align-items: center; gap: 6px; }
+.dwg-zoom button { min-width: 30px; padding: 3px 9px; }
+.dwg-zoom span { min-width: 48px; text-align: center; font-size: 12px; color: var(--text-mute); }
+.dwg-readout {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  font-size: 12px;
+}
+.dwg-readout .ro-k { color: var(--text-mute); }
+.dwg-readout .ro-v {
+  background: rgba(11,14,20,.6); border: 1px solid var(--line);
+  border-radius: 4px; padding: 2px 8px; min-width: 104px; display: inline-block;
+  font-variant-numeric: tabular-nums;
+}
+/* 확대 시 가로로 훑어볼 수 있게 */
+.dwg-wrap.zoomed { overflow: auto; }
+
+/* 선택한 핀의 정밀 조정 패널 */
+.sp-detail {
+  border: 1px solid var(--accent); border-radius: var(--radius-sm);
+  background: var(--accent-soft); padding: 10px 12px; margin-bottom: 10px;
+}
+.sp-detail-head {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 8px; font-size: 12.5px;
+}
+.sp-detail-head .sp-no {
+  font-weight: 800; font-variant-numeric: tabular-nums; color: var(--accent);
+}
+.sp-detail-head button { margin-left: auto; padding: 1px 8px; }
+.field-row.tight { gap: 8px; align-items: flex-end; }
+.field-row.tight .field { min-width: 92px; }
+.sp-detail-mm { margin-top: 7px; font-size: 11.5px; color: var(--text-mute); }
 
 /* ─── 보고서 선택 ─────────────────────────────────────────── */
 .chip.pick { cursor: pointer; display: flex; align-items: center; gap: 9px; }

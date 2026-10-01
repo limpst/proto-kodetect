@@ -11,6 +11,10 @@ const WS = {
   activeDrawing: null,
   spots: [],
   armed: false,             // 위치 찍기 대기 상태
+  zoom: 1,                  // 도면 확대 배율 — 실금 위치를 정확히 찍으려면 확대가 필요하다
+  activeSpot: null,         // 선택한 핀 id
+  dragging: null,           // 끌고 있는 핀 id
+  grab: null,               // 끌기 시작 지점과 핀 중심의 간격
 };
 
 /* ─── 공통 ──────────────────────────────────────────────── */
@@ -244,6 +248,38 @@ async function runGroupDemo() {
 }
 
 /* ─── STEP 04 · 도면 · 위치 ─────────────────────────────── */
+
+/* 도면 좌표계
+   핀의 x·y 는 도면 원본 픽셀 기준이며 원점은 좌상단이다. 화면 표시는 확대·축소에
+   따라 바뀌지만 저장값은 늘 원본 px 이라, 나중에 도면 파일을 교체해도 좌표가 흔들리지 않는다.
+   축척(mm_per_px)이 있으면 같은 좌표를 실치수로도 보여 준다 — 물량 산출의 근거가 된다. */
+
+/** 도면 px → 실치수 문자열. 축척이 없으면 null. */
+function mmText(d, x, y) {
+  if (!d || !d.mm_per_px) return null;
+  const mx = x * d.mm_per_px;
+  const my = y * d.mm_per_px;
+  // 1 m 이상이면 m 로, 아니면 mm 로 — 현장에서 읽기 쉬운 단위를 고른다
+  return mx >= 1000 || my >= 1000
+    ? `${num(mx / 1000, 2)} m, ${num(my / 1000, 2)} m`
+    : `${num(mx, 0)} mm, ${num(my, 0)} mm`;
+}
+
+/** 확대 배율 적용 후 라벨 갱신. */
+function applyZoom(z) {
+  const d = WS.activeDrawing;
+  if (!d) return;
+  WS.zoom = Math.min(8, Math.max(0.25, z));
+  const wrap = el("dwCanvasWrap");
+  const cv = el("dwCanvas");
+  if (cv) {
+    // 배율 1 = 카드 폭에 맞춤. 그 이상은 가로 스크롤로 훑는다.
+    cv.style.width = `${WS.zoom * 100}%`;
+    wrap.classList.toggle("zoomed", WS.zoom > 1);
+  }
+  el("dwZoomLabel").textContent = `${Math.round(WS.zoom * 100)}%`;
+}
+
 async function loadDrawings() {
   if (!el("spMember").options.length) {
     el("spMember").innerHTML = memberOptions("column");
@@ -294,6 +330,8 @@ async function createDrawing() {
   fd.append("name", name);
   const f = el("dwFile").files[0];
   if (f) fd.append("file", f);
+  const mm = parseFloat(el("dwMm").value);
+  if (Number.isFinite(mm) && mm > 0) fd.append("mm_per_px", mm);
 
   try {
     const d = await api("/api/drawings", { method: "POST", body: fd });
@@ -313,8 +351,43 @@ async function createDrawing() {
 async function openDrawing(id) {
   WS.activeDrawing = WS.drawings.find((d) => d.id === id);
   WS.spots = await api(`/api/drawings/${id}/spots`);
+  if (!WS.spots.some((s) => s.id === WS.activeSpot)) WS.activeSpot = null;
   renderCanvas();
   renderSpotTable();
+  renderSpotDetail();
+}
+
+/** 선택한 핀의 정밀 조정 패널. 클릭으로는 못 맞추는 좌표를 수치로 보정한다. */
+function renderSpotDetail() {
+  const box = el("spDetail");
+  const s = WS.spots.find((x) => x.id === WS.activeSpot);
+  if (!s) {
+    box.hidden = true;
+    return;
+  }
+  const d = WS.activeDrawing;
+  box.hidden = false;
+  el("spdNo").textContent = `#${s.number}`;
+  el("spdName").textContent = s.group_name || "연결 안 함";
+  el("spdX").value = Math.round(s.x);
+  el("spdY").value = Math.round(s.y);
+  const mm = mmText(d, s.x, s.y);
+  el("spdMm").textContent = mm ? `실치수 ${mm}` : "축척이 설정되지 않아 실치수를 낼 수 없습니다";
+}
+
+/** 좌표를 서버에 반영. 드래그와 수치 입력이 같은 경로를 쓴다. */
+async function moveSpot(id, x, y) {
+  const d = WS.activeDrawing;
+  const [w, h] = d.size;
+  const nx = Math.round(Math.min(w, Math.max(0, x)));
+  const ny = Math.round(Math.min(h, Math.max(0, y)));
+  await api(`/api/spots/${id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ x: nx, y: ny }),
+  });
+  const s = WS.spots.find((v) => v.id === id);
+  if (s) { s.x = nx; s.y = ny; }
 }
 
 function renderCanvas() {
@@ -340,9 +413,9 @@ function renderCanvas() {
       }
       ${WS.spots
         .map(
-          (s) => `<div class="pin" data-sid="${s.id}"
+          (s) => `<div class="pin${s.id === WS.activeSpot ? " active" : ""}" data-sid="${s.id}"
             style="left:${(s.x / w) * 100}%;top:${(s.y / h) * 100}%"
-            title="${esc(s.group_name || "연결 안 함")}">
+            title="#${s.number} · ${esc(s.group_name || "연결 안 함")} · ${Math.round(s.x)}, ${Math.round(s.y)} px">
             <i>${s.number}</i>
             <span>${esc(s.group_name || "—")} · ${int(s.photo_count)}장</span>
           </div>`
@@ -350,11 +423,80 @@ function renderCanvas() {
         .join("")}
     </div>`;
 
-  el("dwCanvas").addEventListener("click", async (e) => {
+  const cv = el("dwCanvas");
+
+  /** 화면 좌표 → 도면 원본 px. 확대 배율과 무관하게 같은 값이 나온다. */
+  const toDrawing = (e) => {
+    const r = cv.getBoundingClientRect();
+    return [((e.clientX - r.left) / r.width) * w, ((e.clientY - r.top) / r.height) * h];
+  };
+
+  // 커서 위치를 실시간으로 읽어 준다 — 핀을 찍기 전에 좌표를 확인할 수 있다
+  cv.addEventListener("mousemove", (e) => {
+    const [x, y] = toDrawing(e);
+    if (x < 0 || y < 0 || x > w || y > h) return;
+    el("roPx").textContent = `${Math.round(x)}, ${Math.round(y)} px`;
+    const mm = mmText(d, x, y);
+    el("roMm").textContent = mm || "축척 미설정";
+    if (WS.dragging !== null && WS.grab) {
+      // 잡은 지점과 핀 중심의 간격을 유지한다. 안 그러면 원 가장자리를 잡았을 때
+      // 핀이 커서로 튀어 '선택만 하려던 클릭'이 이동이 되어 버린다.
+      const pin = cv.querySelector(`.pin[data-sid="${WS.dragging}"]`);
+      if (pin) {
+        pin.style.left = `${((WS.grab.px + x - WS.grab.sx) / w) * 100}%`;
+        pin.style.top = `${((WS.grab.py + y - WS.grab.sy) / h) * 100}%`;
+      }
+    }
+  });
+  cv.addEventListener("mouseleave", () => {
+    el("roPx").textContent = "—";
+    el("roMm").textContent = d.mm_per_px ? "—" : "축척 미설정";
+  });
+
+  // 핀 선택 · 끌어 옮기기
+  cv.querySelectorAll(".pin").forEach((pin) => {
+    const sid = Number(pin.dataset.sid);
+    pin.addEventListener("mousedown", (e) => {
+      e.stopPropagation();           // 캔버스 클릭(새 핀 생성)과 섞이지 않게
+      const s = WS.spots.find((v) => v.id === sid);
+      if (!s) return;
+      const [sx, sy] = toDrawing(e);
+      WS.activeSpot = sid;
+      WS.dragging = sid;
+      WS.grab = { sx, sy, px: s.x, py: s.y };   // 잡은 지점과 핀 중심의 간격
+      pin.classList.add("dragging");
+      renderSpotDetail();
+      cv.querySelectorAll(".pin").forEach((p) => p.classList.toggle("active", p === pin));
+    });
+  });
+
+  window.addEventListener("mouseup", async function onUp(e) {
+    if (WS.dragging === null) return;
+    const id = WS.dragging;
+    const grab = WS.grab;
+    WS.dragging = null;
+    WS.grab = null;
+    cv.querySelectorAll(".pin").forEach((p) => p.classList.remove("dragging"));
+    const [x, y] = toDrawing(e);
+    const s = WS.spots.find((v) => v.id === id);
+    if (!s || !grab) { renderSpotDetail(); return; }
+    // 커서가 2px 미만으로 움직였으면 '선택만 한 클릭'이다 — 좌표를 건드리지 않는다
+    const dx = x - grab.sx;
+    const dy = y - grab.sy;
+    if (Math.abs(dx) < 2 && Math.abs(dy) < 2) { renderSpotDetail(); return; }
+    try {
+      await moveSpot(id, grab.px + dx, grab.py + dy);
+      await openDrawing(d.id);
+    } catch (err) {
+      el("dwStatus").innerHTML = `<div class="alert critical">위치 이동 실패: ${esc(err.message)}</div>`;
+      await openDrawing(d.id);
+    }
+  });
+
+  // 빈 곳 클릭 — 위치 찍기 대기 상태일 때만 새 핀을 만든다
+  cv.addEventListener("click", async (e) => {
     if (!WS.armed) return;
-    const r = e.currentTarget.getBoundingClientRect();
-    const x = ((e.clientX - r.left) / r.width) * w;
-    const y = ((e.clientY - r.top) / r.height) * h;
+    const [x, y] = toDrawing(e);
     const gid = el("spGroup").value;
     await api("/api/spots", {
       method: "POST",
@@ -373,6 +515,8 @@ function renderCanvas() {
     await openDrawing(d.id);
     await loadDrawings();
   });
+
+  applyZoom(WS.zoom);
 }
 
 function renderSpotTable() {
@@ -383,18 +527,45 @@ function renderSpotTable() {
       { h: "그룹", render: (s) => esc(s.group_name || "—") },
       { h: "부재", render: (s) => esc(s.member_label) },
       { h: "방향", render: (s) => esc(s.direction || "—") },
+      // 도면 위치정보 — 저장값은 늘 원본 px 이고, 축척이 있으면 실치수를 함께 보여 준다
+      {
+        h: "좌표 (px)",
+        cls: "num",
+        render: (s) => `${Math.round(s.x)}, ${Math.round(s.y)}`,
+      },
+      {
+        h: "실치수",
+        cls: "num",
+        render: (s) => esc(mmText(WS.activeDrawing, s.x, s.y) || "—"),
+      },
       { h: "사진", cls: "num", render: (s) => int(s.photo_count) },
       { h: "손상", cls: "num", render: (s) => int(s.defect_count) },
-      { h: "", render: (s) => `<button data-rm="${s.id}">삭제</button>` },
+      {
+        h: "",
+        render: (s) =>
+          `<button data-pick="${s.id}">선택</button> <button data-rm="${s.id}">삭제</button>`,
+      },
     ],
     WS.spots,
     "위치가 없습니다"
   );
+
+  el("spTable")
+    .querySelectorAll("[data-pick]")
+    .forEach((n) =>
+      n.addEventListener("click", () => {
+        WS.activeSpot = Number(n.dataset.pick);
+        renderCanvas();
+        renderSpotDetail();
+      })
+    );
+
   el("spTable")
     .querySelectorAll("[data-rm]")
     .forEach((n) =>
       n.addEventListener("click", async () => {
         await api(`/api/spots/${n.dataset.rm}`, { method: "DELETE" });
+        if (WS.activeSpot === Number(n.dataset.rm)) WS.activeSpot = null;
         await openDrawing(WS.activeDrawing.id);
         await loadDrawings();
       })
@@ -527,6 +698,30 @@ document.addEventListener("DOMContentLoaded", () => {
     WS.armed = !WS.armed;
     e.currentTarget.classList.toggle("primary", WS.armed);
     renderCanvas();
+  });
+
+  // 확대·축소 — 실금 위치를 px 단위로 맞추려면 확대가 필요하다
+  el("dwZoomIn")?.addEventListener("click", () => applyZoom(WS.zoom * 1.5));
+  el("dwZoomOut")?.addEventListener("click", () => applyZoom(WS.zoom / 1.5));
+  el("dwZoomFit")?.addEventListener("click", () => applyZoom(1));
+
+  // 선택한 핀의 좌표를 수치로 보정
+  el("spdApply")?.addEventListener("click", async () => {
+    if (WS.activeSpot === null) return;
+    const x = parseFloat(el("spdX").value);
+    const y = parseFloat(el("spdY").value);
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    try {
+      await moveSpot(WS.activeSpot, x, y);
+      await openDrawing(WS.activeDrawing.id);
+    } catch (err) {
+      el("dwStatus").innerHTML = `<div class="alert critical">좌표 적용 실패: ${esc(err.message)}</div>`;
+    }
+  });
+  el("spdClose")?.addEventListener("click", () => {
+    WS.activeSpot = null;
+    renderCanvas();
+    renderSpotDetail();
   });
   el("dlBuild")?.addEventListener("click", () => buildReport().catch(console.error));
 });
